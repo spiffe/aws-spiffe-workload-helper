@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"time"
 
 	"github.com/aws/rolesanywhere-credential-helper/aws_signing_helper"
 	"github.com/spf13/cobra"
@@ -31,11 +30,18 @@ func main() {
 }
 
 func newRootCmd() (*cobra.Command, error) {
+	var debug bool
 	rootCmd := &cobra.Command{
 		Use:     "aws-spiffe-workload-helper",
 		Short:   "TODO", // TODO(strideynet): Helpful, short description.
 		Long:    `TODO`, // TODO(strideynet): Helpful, long description.
 		Version: version,
+	}
+	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if debug {
+			slog.SetLogLoggerLevel(slog.LevelDebug)
+		}
 	}
 
 	x509CredentialProcessCmd, err := newX509CredentialProcessCmd()
@@ -52,7 +58,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 		roleARN         string
 		region          string
 		profileARN      string
-		sessionDuration time.Duration
+		sessionDuration int
 		trustAnchorARN  string
 		roleSessionName string
 	)
@@ -74,6 +80,13 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			// TODO(strideynet): Implement SVID selection mechanism, for now,
 			// we'll just use the first returned SVID (a.k.a the default).
 			svid := x509Ctx.DefaultSVID()
+			slog.Debug(
+				"Fetched X509 SVID",
+				slog.Group("svid",
+					"spiffe_id", svid.ID,
+					"hint", svid.Hint,
+				),
+			)
 
 			signer := &awsspiffe.X509SVIDSigner{
 				SVID: svid,
@@ -88,10 +101,15 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 				Region:            region,
 				RoleSessionName:   roleSessionName,
 				TrustAnchorArnStr: trustAnchorARN,
+				SessionDuration:   sessionDuration,
 			}, signer, signatureAlgorithm)
 			if err != nil {
 				return fmt.Errorf("generating credentials: %w", err)
 			}
+			slog.Debug(
+				"Generated AWS credentials",
+				"expiration", credentials.Expiration,
+			)
 
 			out, err := json.Marshal(credentials)
 			if err != nil {
@@ -113,7 +131,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 	if err := cmd.MarkFlagRequired("profile-arn"); err != nil {
 		return nil, fmt.Errorf("marking profile-arn flag as required: %w", err)
 	}
-	cmd.Flags().DurationVar(&sessionDuration, "session-duration", 0, "The duration of the resulting session. Optional. Can range from 15m to 12h.")
+	cmd.Flags().IntVar(&sessionDuration, "session-duration", 3600, "The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).")
 	cmd.Flags().StringVar(&trustAnchorARN, "trust-anchor-arn", "", "The ARN of the Roles Anywhere trust anchor to use. Required.")
 	if err := cmd.MarkFlagRequired("trust-anchor-arn"); err != nil {
 		return nil, fmt.Errorf("marking trust-anchor-arn flag as required: %w", err)
