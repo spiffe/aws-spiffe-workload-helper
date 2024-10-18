@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -17,6 +18,19 @@ var (
 )
 
 func main() {
+	rootCmd, err := newRootCmd()
+	if err != nil {
+		slog.Error("Failed to initialize CLI", "error", err)
+		os.Exit(1)
+	}
+
+	if err := rootCmd.Execute(); err != nil {
+		slog.Error("Encountered a fatal error during execution", "error", err)
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() (*cobra.Command, error) {
 	rootCmd := &cobra.Command{
 		Use:     "aws-spiffe-workload-helper",
 		Short:   "TODO", // TODO(strideynet): Helpful, short description.
@@ -24,16 +38,16 @@ func main() {
 		Version: version,
 	}
 
-	x509CredentialProcessCmd := newX509CredentialProcessCmd()
+	x509CredentialProcessCmd, err := newX509CredentialProcessCmd()
+	if err != nil {
+		return nil, fmt.Errorf("initializing x509-credential-process command: %w", err)
+	}
 	rootCmd.AddCommand(x509CredentialProcessCmd)
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
+	return rootCmd, nil
 }
 
-func newX509CredentialProcessCmd() *cobra.Command {
+func newX509CredentialProcessCmd() (*cobra.Command, error) {
 	var (
 		roleARN         string
 		region          string
@@ -91,13 +105,19 @@ func newX509CredentialProcessCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&roleARN, "role-arn", "", "The ARN of the role to assume. Required.")
-	cmd.MarkFlagRequired("role-arn")
+	if err := cmd.MarkFlagRequired("role-arn"); err != nil {
+		return nil, fmt.Errorf("marking role-arn flag as required: %w", err)
+	}
 	cmd.Flags().StringVar(&region, "region", "", "The AWS region to use. Optional.")
 	cmd.Flags().StringVar(&profileARN, "profile-arn", "", "The ARN of the Roles Anywhere profile to use. Required.")
-	cmd.MarkFlagRequired("profile-arn")
+	if err := cmd.MarkFlagRequired("profile-arn"); err != nil {
+		return nil, fmt.Errorf("marking profile-arn flag as required: %w", err)
+	}
 	cmd.Flags().DurationVar(&sessionDuration, "session-duration", 0, "The duration of the resulting session. Optional. Can range from 15m to 12h.")
 	cmd.Flags().StringVar(&trustAnchorARN, "trust-anchor-arn", "", "The ARN of the Roles Anywhere trust anchor to use. Required.")
-	cmd.MarkFlagRequired("trust-anchor-arn")
+	if err := cmd.MarkFlagRequired("trust-anchor-arn"); err != nil {
+		return nil, fmt.Errorf("marking trust-anchor-arn flag as required: %w", err)
+	}
 	cmd.Flags().StringVar(&roleSessionName, "role-session-name", "", "The identifier for the role session. Optional.")
-	return cmd
+	return cmd, nil
 }
