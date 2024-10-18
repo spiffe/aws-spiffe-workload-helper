@@ -78,15 +78,14 @@ func newX509CredentialProcessCmd() *cobra.Command {
 			return nil
 		},
 	}
-	// TODO(strideynet): Review flag help strings.
-	cmd.Flags().StringVar(&roleARN, "role-arn", "", "TODO. Required.")
+	cmd.Flags().StringVar(&roleARN, "role-arn", "", "The ARN of the role to assume. Required.")
 	cmd.MarkFlagRequired("role-arn")
-	cmd.Flags().StringVar(&region, "region", "", "TODO")
-	cmd.Flags().StringVar(&profileARN, "profile-arn", "", "TODO. Required.")
+	cmd.Flags().StringVar(&region, "region", "", "The AWS region to use. Optional.")
+	cmd.Flags().StringVar(&profileARN, "profile-arn", "", "The ARN of the Roles Anywhere profile to use. Required.")
 	cmd.MarkFlagRequired("profile-arn")
-	cmd.Flags().DurationVar(&sessionDuration, "session-duration", 0, "TODO")
-	cmd.Flags().StringVar(&trustAnchorARN, "trust-anchor-arn", "", "TODO. Required.")
+	cmd.Flags().DurationVar(&sessionDuration, "session-duration", 0, "The duration of the resulting session. Optional. Can range from 15m to 12h.")
+	cmd.Flags().StringVar(&trustAnchorARN, "trust-anchor-arn", "", "The ARN of the Roles Anywhere trust anchor to use. Required.")
 	cmd.MarkFlagRequired("trust-anchor-arn")
-	cmd.Flags().StringVar(&roleSessionName, "role-session-name", "", "TODO")
+	cmd.Flags().StringVar(&roleSessionName, "role-session-name", "", "The identifier for the role session. Optional.")
 	return cmd
 }
