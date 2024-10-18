@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -67,14 +68,25 @@ func newX509CredentialProcessCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("getting signature algorithm: %w", err)
 			}
-			aws_signing_helper.GenerateCredentials(&aws_signing_helper.CredentialsOpts{
+			credentials, err := aws_signing_helper.GenerateCredentials(&aws_signing_helper.CredentialsOpts{
 				RoleArn:           roleARN,
 				ProfileArnStr:     profileARN,
 				Region:            region,
 				RoleSessionName:   roleSessionName,
 				TrustAnchorArnStr: trustAnchorARN,
 			}, signer, signatureAlgorithm)
+			if err != nil {
+				return fmt.Errorf("generating credentials: %w", err)
+			}
 
+			out, err := json.Marshal(credentials)
+			if err != nil {
+				return fmt.Errorf("marshalling credentials: %w", err)
+			}
+			_, err = os.Stdout.Write(out)
+			if err != nil {
+				return fmt.Errorf("writing credentials to stdout: %w", err)
+			}
 			return nil
 		},
 	}
