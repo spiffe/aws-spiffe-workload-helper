@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/aws/rolesanywhere-credential-helper/aws_signing_helper"
 	"github.com/spf13/cobra"
 	awsspiffe "github.com/spiffe/aws-spiffe-workload-helper"
+	"github.com/spiffe/aws-spiffe-workload-helper/internal/vendoredaws"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
@@ -95,7 +95,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("getting signature algorithm: %w", err)
 			}
-			credentials, err := aws_signing_helper.GenerateCredentials(&aws_signing_helper.CredentialsOpts{
+			credentials, err := vendoredaws.GenerateCredentials(&vendoredaws.CredentialsOpts{
 				RoleArn:           roleARN,
 				ProfileArnStr:     profileARN,
 				Region:            region,
