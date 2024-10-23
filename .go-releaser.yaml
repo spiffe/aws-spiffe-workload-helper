@@ -17,6 +17,8 @@ builds:
       - linux
       - windows
       - darwin
+    main: ./cmd
+    binary: aws-spiffe-workload-helper
 
 archives:
   - format: tar.gz
