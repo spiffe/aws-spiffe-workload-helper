@@ -6,25 +6,37 @@
 AWS SPIFFE Workload Helper is a light-weight tool intended to assist in
 providing a workload with credentials for AWS using its SPIFFE identity.
 
-Currently, the helper only supports authenticating to AWS using an X.509 SVID
-via [AWS Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html).
 It provides a more native experience when using SPIFFE identities compared to
 the [`rolesanywhere-credential-helper`](https://github.com/aws/rolesanywhere-credential-helper)
-released by AWS.
+released by AWS, and is intended to be used in place of
+`rolesanywhere-credential-helper`.
+
+Currently, the helper only supports authenticating to AWS using an X.509 SVID
+via [AWS Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html).
 
 ## Usage
 
-TODO: Link to full guide on SPIFFE website for a proper "getting started"
+### Getting Started
 
-### Binary
+Follow the guidance at
+<https://docs.aws.amazon.com/rolesanywhere/latest/userguide/getting-started.html>
+and substitute the usage of `rolesanywhere-credential-helper` with this utility.
 
-TODO: ...
+### Installation
 
-### Configuring AWS SDKs and CLIs
+#### Binary
 
-TODO: ...
+The `aws-spiffe-workload-helper` binary is available for a range of
+architectures within the
+[GitHub Releases](https://github.com/spiffe/aws-spiffe-workload-helper/releases)
+of this repository.
 
-### OCI Image
+Download the appropriate artifact for your architecture, and extract the
+.tar.gz. The binary can then be placed somewhere on the system where it will be
+accessible to workloads that use the AWS SDKs or CLIs. It may be beneficial to
+ensure it is in a location that is within your PATH.
+
+#### OCI Image
 
 The `aws-spiffe-workload-helper` is also distributed within an OCI image. This
 may be useful as a source of the binary if you are building your own image and
@@ -35,6 +47,53 @@ These images are published to the GitHub Container Registry: [ghcr.io/spiffe/aws
 ```dockerfile
 COPY --from=ghcr.io/spiffe/aws-spiffe-workload-helper:latest /ko-app/cmd /aws-spiffe-workload-helper
 ```
+
+### CLI Commands
+
+#### `x509-credential-process`
+
+The `x509-credential-process` command exchanges an X509 SVID for a short-lived
+set of AWS credentials using the AWS Roles Anywhere API. It returns the
+credentials to STDOUT, in the format expected by AWS SDKs and CLIs when invoking
+an external credential process.
+
+The command fetches the X509-SVID from the SPIFFE Workload API. The location of
+the SPIFFE Workload API endpoint should be specified using the
+`SPIFFE_ENDPOINT_SOCKET` environment variable or the `--workload-api-addr` flag.
+
+Example usage:
+
+```sh
+$ aws-spiffe-workload-helper x509-credential-process \
+    --trust-anchor-arn arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/0000000-0000-0000-0000-000000000000 \
+    --profile-arn arn:aws:rolesanywhere:us-east-1:123456789012:profile/0000000-0000-0000-0000-000000000000 \
+    --role-arn arn:aws:iam::123456789012:role/example-role \
+    --workload-api-addr /opt/workload-api.sock
+```
+
+Flags:
+
+- TODO
+
+### Configuring AWS SDKs and CLIs
+
+To configure AWS SDKs and CLIs to use Roles Anywhere and SPIFFE for
+authentication, you will modify the AWS configuration file.
+
+By default, AWS SDKs and CLIs will expect this file to be located at 
+`~/.aws/config`. This location can be customized using the `AWS_CONFIG_FILE`
+environment variable.
+
+Example configuration:
+
+```toml
+[default]
+credential_process = /usr/bin/aws-spiffe-workload-helper x509-credential-process --profile-arn arn:aws:rolesanywhere:us-east-1:123456789012:profile/0000000-0000-0000-0000-000000000000
+--trust-anchor-arn arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/0000000-0000-0000-0000-000000000000 --role-arn arn:aws:iam::123456789012:role/example-role
+```
+
+You can learn more about external credential processes at
+<https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html>
 
 ## Contributing
 
