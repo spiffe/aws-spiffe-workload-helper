@@ -61,6 +61,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 		sessionDuration int
 		trustAnchorARN  string
 		roleSessionName string
+		workloadAPIAddr string
 	)
 	cmd := &cobra.Command{
 		Use:   "x509-credential-process",
@@ -68,7 +69,10 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 		Long:  `TODO`, // TODO(strideynet): Helpful, long description.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			client, err := workloadapi.New(ctx) // TODO(strideynet): Ability to configure workload api endpoint with flag
+			client, err := workloadapi.New(
+				ctx,
+				workloadapi.WithAddr(workloadAPIAddr),
+			)
 			if err != nil {
 				return fmt.Errorf("creating workload api client: %w", err)
 			}
@@ -137,5 +141,6 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 		return nil, fmt.Errorf("marking trust-anchor-arn flag as required: %w", err)
 	}
 	cmd.Flags().StringVar(&roleSessionName, "role-session-name", "", "The identifier for the role session. Optional.")
+	cmd.Flags().StringVar(&workloadAPIAddr, "workload-api-addr", "", "Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used.")
 	return cmd, nil
 }
