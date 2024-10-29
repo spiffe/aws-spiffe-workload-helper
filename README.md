@@ -50,7 +50,7 @@ COPY --from=ghcr.io/spiffe/aws-spiffe-workload-helper:latest /ko-app/cmd /aws-sp
 
 ### CLI Commands
 
-#### `x509-credential-process`
+#### `x509-credential-process`
 
 The `x509-credential-process` command exchanges an X509 SVID for a short-lived
 set of AWS credentials using the AWS Roles Anywhere API. It returns the
