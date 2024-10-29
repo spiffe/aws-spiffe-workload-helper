@@ -16,7 +16,7 @@ via [AWS Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/usergu
 
 ## Usage
 
-### Getting Started
+### Getting Started
 
 Follow the guidance at
 <https://docs.aws.amazon.com/rolesanywhere/latest/userguide/getting-started.html>
