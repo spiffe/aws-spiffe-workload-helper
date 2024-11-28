@@ -33,8 +33,8 @@ func newRootCmd() (*cobra.Command, error) {
 	var debug bool
 	rootCmd := &cobra.Command{
 		Use:     "aws-spiffe-workload-helper",
-		Short:   "TODO", // TODO(strideynet): Helpful, short description.
-		Long:    `TODO`, // TODO(strideynet): Helpful, long description.
+		Short:   `A light-weight tool intended to assist in providing a workload with credentials for AWS using its SPIFFE identity.`,
+		Long:    `A light-weight tool intended to assist in providing a workload with credentials for AWS using its SPIFFE identity.`,
 		Version: version,
 	}
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
@@ -65,8 +65,8 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 	)
 	cmd := &cobra.Command{
 		Use:   "x509-credential-process",
-		Short: "TODO", // TODO(strideynet): Helpful, short description.
-		Long:  `TODO`, // TODO(strideynet): Helpful, long description.
+		Short: `Exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Compatible with the AWS credential process functionality.`,
+		Long:  `Exchanges an X509 SVID for a short-lived set of AWS credentials using the AWS Roles Anywhere API. It returns the credentials to STDOUT, in the format expected by AWS SDKs and CLIs when invoking an external credential process.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			client, err := workloadapi.New(
@@ -130,7 +130,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 	if err := cmd.MarkFlagRequired("role-arn"); err != nil {
 		return nil, fmt.Errorf("marking role-arn flag as required: %w", err)
 	}
-	cmd.Flags().StringVar(&region, "region", "", "The AWS region to use. Optional.")
+	cmd.Flags().StringVar(&region, "region", "", "Overrides AWS region to use when exchanging the SVID for AWS credentials. Optional.")
 	cmd.Flags().StringVar(&profileARN, "profile-arn", "", "The ARN of the Roles Anywhere profile to use. Required.")
 	if err := cmd.MarkFlagRequired("profile-arn"); err != nil {
 		return nil, fmt.Errorf("marking profile-arn flag as required: %w", err)

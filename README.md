@@ -68,12 +68,20 @@ $ aws-spiffe-workload-helper x509-credential-process \
     --trust-anchor-arn arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/0000000-0000-0000-0000-000000000000 \
     --profile-arn arn:aws:rolesanywhere:us-east-1:123456789012:profile/0000000-0000-0000-0000-000000000000 \
     --role-arn arn:aws:iam::123456789012:role/example-role \
-    --workload-api-addr /opt/workload-api.sock
+    --workload-api-addr unix:///opt/workload-api.sock
 ```
 
-Flags:
+##### Reference
 
-- TODO
+| Flag              | Required | Description                                                                                                                                                                              | Example                                                                                         |
+|-------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| role-arn          | Yes      | The ARN of the role to assume. Required.                                                                                                                                                 | `arn:aws:iam::123456789012:role/example-role`                                                   |
+| profile-arn       | Yes      | The ARN of the Roles Anywhere profile to use. Required.                                                                                                                                  | `arn:aws:rolesanywhere:us-east-1:123456789012:profile/0000000-0000-0000-0000-00000000000`       |
+| trust-anchor-arn  | Yes      | The ARN of the Roles Anywhere trust anchor to use. Required.                                                                                                                             | `arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/0000000-0000-0000-0000-000000000000` |
+| region            | No       | Overrides AWS region to use when exchanging the SVID for AWS credentials. Optional.                                                                                                      | `us-east-1`                                                                                     |
+| session-duration  | No       | The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).                                                                       | `3600`                                                                                          |
+| workload-api-addr | No       | Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used. | `unix:///opt/my/path/workload.sock`                                                             |
+
 
 ### Configuring AWS SDKs and CLIs
 
