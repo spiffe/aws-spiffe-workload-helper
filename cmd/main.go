@@ -50,9 +50,9 @@ func newRootCmd() (*cobra.Command, error) {
 	}
 	rootCmd.AddCommand(x509CredentialProcessCmd)
 
-	oneShotCredentialWriteCmd, err := newOneShotCredentialWrite()
+	oneShotCredentialWriteCmd, err := newX509CredentialFileCmd()
 	if err != nil {
-		return nil, fmt.Errorf("initializing one-shot-credential-write command: %w", err)
+		return nil, fmt.Errorf("initializing x509-credential-file command: %w", err)
 	}
 	rootCmd.AddCommand(oneShotCredentialWriteCmd)
 
@@ -89,10 +89,10 @@ func (f *sharedFlags) addFlags(cmd *cobra.Command) error {
 	return nil
 }
 
-func newOneShotCredentialWrite() (*cobra.Command, error) {
+func newX509CredentialFileCmd() (*cobra.Command, error) {
 	sf := &sharedFlags{}
 	cmd := &cobra.Command{
-		Use:   "x509-one-shot-credential-write",
+		Use:   "x509-credential-file",
 		Short: ``,
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -109,6 +109,40 @@ func newOneShotCredentialWrite() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("fetching x509 context: %w", err)
 			}
+			svid := x509Ctx.DefaultSVID()
+			slog.Debug(
+				"Fetched X509 SVID",
+				slog.Group("svid",
+					"spiffe_id", svid.ID,
+					"hint", svid.Hint,
+				),
+			)
+
+			signer := &awsspiffe.X509SVIDSigner{
+				SVID: svid,
+			}
+			signatureAlgorithm, err := signer.SignatureAlgorithm()
+			if err != nil {
+				return fmt.Errorf("getting signature algorithm: %w", err)
+			}
+			credentials, err := vendoredaws.GenerateCredentials(&vendoredaws.CredentialsOpts{
+				RoleArn:           sf.roleARN,
+				ProfileArnStr:     sf.profileARN,
+				Region:            sf.region,
+				RoleSessionName:   sf.roleSessionName,
+				TrustAnchorArnStr: sf.trustAnchorARN,
+				SessionDuration:   sf.sessionDuration,
+			}, signer, signatureAlgorithm)
+			if err != nil {
+				return fmt.Errorf("generating credentials: %w", err)
+			}
+			slog.Debug(
+				"Generated AWS credentials",
+				"expiration", credentials.Expiration,
+			)
+
+			// Now we write this to disk in the format that the AWS CLI/SDK
+			// expects for a credentials file.
 		},
 		// Hidden for now as the daemon is likely more "usable"
 		Hidden: true,
