@@ -21,9 +21,42 @@ type AWSCredentialsFileProfile struct {
 	AWSSessionToken    string
 }
 
-func (p AWSCredentialsFileProfile) Validate() error {
-	// TODO: Validate
-	return nil
+func loadAWSCredentialsFile(
+	log *slog.Logger,
+	cfg AWSCredentialsFileConfig,
+) (*ini.File, error) {
+	if cfg.ReplaceFile {
+		return ini.Empty(), nil
+	}
+
+	f, err := ini.Load(cfg.Path)
+	if err == nil {
+		return f, nil
+	}
+
+	// If it doesn't exist, we can "create" it.
+	// TODO: Make directory/parent directories if necessary.
+	if os.IsNotExist(err) {
+		return ini.Empty(), nil
+	}
+
+	// If force mode is enabled, ignore the error and return an empty file.
+	if cfg.Force {
+		log.Warn(
+			"When loading the existing AWS credentials file, an error occurred. As --force is set, the file will be overwritten.",
+			"error", err,
+			"path", cfg.Path,
+		)
+		return ini.Empty(), nil
+	}
+
+	// Otherwise, fail...
+	log.Error(
+		"When loading the existing AWS credentials file, an error occurred. Use --force to ignore errors and attempt to overwrite.",
+		"error", err,
+		"path", cfg.Path,
+	)
+	return nil, fmt.Errorf("loading existing aws credentials file: %w", err)
 }
 
 // UpsertAWSCredentialsFileProfile writes the provided AWS credentials profile to the AWS credentials file.
@@ -33,28 +66,9 @@ func UpsertAWSCredentialsFileProfile(
 	cfg AWSCredentialsFileConfig,
 	p AWSCredentialsFileProfile,
 ) error {
-	if err := p.Validate(); err != nil {
-		return fmt.Errorf("validating aws credentials file profile: %w", err)
-	}
-
-	f, err := ini.Load(cfg.Path)
+	f, err := loadAWSCredentialsFile(log, cfg)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			if !cfg.Force {
-				log.Error(
-					"When loading the existing AWS credentials file, an error occurred. Use --force to ignore errors and attempt to overwrite.",
-					"error", err,
-					"path", cfg.Path,
-				)
-				return fmt.Errorf("loading existing aws credentials file: %w", err)
-			}
-			log.Warn(
-				"When loading the existing AWS credentials file, an error occurred. As --force is set, the file will be overwritten.",
-				"error", err,
-				"path", cfg.Path,
-			)
-		}
-		f = ini.Empty()
+		return fmt.Errorf("loading existing aws credentials: %w", err)
 	}
 
 	sectionName := "default"

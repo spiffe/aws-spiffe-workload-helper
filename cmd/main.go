@@ -8,7 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 	awsspiffe "github.com/spiffe/aws-spiffe-workload-helper"
+	"github.com/spiffe/aws-spiffe-workload-helper/internal"
 	"github.com/spiffe/aws-spiffe-workload-helper/internal/vendoredaws"
+	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
@@ -89,7 +91,40 @@ func (f *sharedFlags) addFlags(cmd *cobra.Command) error {
 	return nil
 }
 
+func exchangeX509SVIDForAWSCredentials(
+	sf *sharedFlags,
+	svid *x509svid.SVID,
+) (vendoredaws.CredentialProcessOutput, error) {
+	signer := &awsspiffe.X509SVIDSigner{
+		SVID: svid,
+	}
+	signatureAlgorithm, err := signer.SignatureAlgorithm()
+	if err != nil {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("getting signature algorithm: %w", err)
+	}
+	credentials, err := vendoredaws.GenerateCredentials(&vendoredaws.CredentialsOpts{
+		RoleArn:           sf.roleARN,
+		ProfileArnStr:     sf.profileARN,
+		Region:            sf.region,
+		RoleSessionName:   sf.roleSessionName,
+		TrustAnchorArnStr: sf.trustAnchorARN,
+		SessionDuration:   sf.sessionDuration,
+	}, signer, signatureAlgorithm)
+	if err != nil {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("generating credentials: %w", err)
+	}
+	slog.Debug(
+		"Generated AWS credentials",
+		"expiration", credentials.Expiration,
+	)
+	return credentials, nil
+}
+
 func newX509CredentialFileCmd() (*cobra.Command, error) {
+	oneshot := false
+	force := false
+	replace := false
+	awsCredentialsPath := ""
 	sf := &sharedFlags{}
 	cmd := &cobra.Command{
 		Use:   "x509-credential-file",
@@ -118,31 +153,31 @@ func newX509CredentialFileCmd() (*cobra.Command, error) {
 				),
 			)
 
-			signer := &awsspiffe.X509SVIDSigner{
-				SVID: svid,
-			}
-			signatureAlgorithm, err := signer.SignatureAlgorithm()
+			credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
 			if err != nil {
-				return fmt.Errorf("getting signature algorithm: %w", err)
+				return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
 			}
-			credentials, err := vendoredaws.GenerateCredentials(&vendoredaws.CredentialsOpts{
-				RoleArn:           sf.roleARN,
-				ProfileArnStr:     sf.profileARN,
-				Region:            sf.region,
-				RoleSessionName:   sf.roleSessionName,
-				TrustAnchorArnStr: sf.trustAnchorARN,
-				SessionDuration:   sf.sessionDuration,
-			}, signer, signatureAlgorithm)
-			if err != nil {
-				return fmt.Errorf("generating credentials: %w", err)
-			}
-			slog.Debug(
-				"Generated AWS credentials",
-				"expiration", credentials.Expiration,
-			)
 
 			// Now we write this to disk in the format that the AWS CLI/SDK
 			// expects for a credentials file.
+			err = internal.UpsertAWSCredentialsFileProfile(
+				slog.Default(),
+				internal.AWSCredentialsFileConfig{
+					Path:        awsCredentialsPath,
+					Force:       force,
+					ReplaceFile: replace,
+				},
+				internal.AWSCredentialsFileProfile{
+					AWSAccessKeyID:     credentials.AccessKeyId,
+					AWSSecretAccessKey: credentials.SecretAccessKey,
+					AWSSessionToken:    credentials.SessionToken,
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("writing credentials to file: %w", err)
+			}
+			slog.Info("Wrote AWS credential to file", "path", "./my-credential")
+			return nil
 		},
 		// Hidden for now as the daemon is likely more "usable"
 		Hidden: true,
@@ -150,6 +185,14 @@ func newX509CredentialFileCmd() (*cobra.Command, error) {
 	if err := sf.addFlags(cmd); err != nil {
 		return nil, fmt.Errorf("adding shared flags: %w", err)
 	}
+	cmd.Flags().BoolVar(&oneshot, "oneshot", false, "If set, generate the AWS credentials file and exit. If unset, run as a daemon that continuously updates the file before expiry or when a new SVID is available.")
+	cmd.Flags().StringVar(&awsCredentialsPath, "aws-credentials-path", "", "The path to the AWS credentials file to write.")
+	if err := cmd.MarkFlagRequired("aws-credentials-path"); err != nil {
+		return nil, fmt.Errorf("marking aws-credentials-path flag as required: %w", err)
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "If set, failures loading the existing AWS credentials file will be ignored and the contents overwritten.")
+	cmd.Flags().BoolVar(&replace, "replace", false, "If set, the AWS credentials file will be replaced if it exists. This will remove any profiles not written by this tool.")
+
 	return cmd, nil
 }
 
@@ -184,28 +227,10 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 				),
 			)
 
-			signer := &awsspiffe.X509SVIDSigner{
-				SVID: svid,
-			}
-			signatureAlgorithm, err := signer.SignatureAlgorithm()
+			credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
 			if err != nil {
-				return fmt.Errorf("getting signature algorithm: %w", err)
+				return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
 			}
-			credentials, err := vendoredaws.GenerateCredentials(&vendoredaws.CredentialsOpts{
-				RoleArn:           sf.roleARN,
-				ProfileArnStr:     sf.profileARN,
-				Region:            sf.region,
-				RoleSessionName:   sf.roleSessionName,
-				TrustAnchorArnStr: sf.trustAnchorARN,
-				SessionDuration:   sf.sessionDuration,
-			}, signer, signatureAlgorithm)
-			if err != nil {
-				return fmt.Errorf("generating credentials: %w", err)
-			}
-			slog.Debug(
-				"Generated AWS credentials",
-				"expiration", credentials.Expiration,
-			)
 
 			out, err := json.Marshal(credentials)
 			if err != nil {
