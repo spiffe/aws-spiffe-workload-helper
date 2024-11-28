@@ -50,19 +50,77 @@ func newRootCmd() (*cobra.Command, error) {
 	}
 	rootCmd.AddCommand(x509CredentialProcessCmd)
 
+	oneShotCredentialWriteCmd, err := newOneShotCredentialWrite()
+	if err != nil {
+		return nil, fmt.Errorf("initializing one-shot-credential-write command: %w", err)
+	}
+	rootCmd.AddCommand(oneShotCredentialWriteCmd)
+
 	return rootCmd, nil
 }
 
+type sharedFlags struct {
+	roleARN         string
+	region          string
+	profileARN      string
+	sessionDuration int
+	trustAnchorARN  string
+	roleSessionName string
+	workloadAPIAddr string
+}
+
+func (f *sharedFlags) addFlags(cmd *cobra.Command) error {
+	cmd.Flags().StringVar(&f.roleARN, "role-arn", "", "The ARN of the role to assume. Required.")
+	if err := cmd.MarkFlagRequired("role-arn"); err != nil {
+		return fmt.Errorf("marking role-arn flag as required: %w", err)
+	}
+	cmd.Flags().StringVar(&f.region, "region", "", "Overrides AWS region to use when exchanging the SVID for AWS credentials. Optional.")
+	cmd.Flags().StringVar(&f.profileARN, "profile-arn", "", "The ARN of the Roles Anywhere profile to use. Required.")
+	if err := cmd.MarkFlagRequired("profile-arn"); err != nil {
+		return fmt.Errorf("marking profile-arn flag as required: %w", err)
+	}
+	cmd.Flags().IntVar(&f.sessionDuration, "session-duration", 3600, "The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).")
+	cmd.Flags().StringVar(&f.trustAnchorARN, "trust-anchor-arn", "", "The ARN of the Roles Anywhere trust anchor to use. Required.")
+	if err := cmd.MarkFlagRequired("trust-anchor-arn"); err != nil {
+		return fmt.Errorf("marking trust-anchor-arn flag as required: %w", err)
+	}
+	cmd.Flags().StringVar(&f.roleSessionName, "role-session-name", "", "The identifier for the role session. Optional.")
+	cmd.Flags().StringVar(&f.workloadAPIAddr, "workload-api-addr", "", "Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used.")
+	return nil
+}
+
+func newOneShotCredentialWrite() (*cobra.Command, error) {
+	sf := &sharedFlags{}
+	cmd := &cobra.Command{
+		Use:   "x509-one-shot-credential-write",
+		Short: ``,
+		Long:  ``,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			client, err := workloadapi.New(
+				ctx,
+				workloadapi.WithAddr(sf.workloadAPIAddr),
+			)
+			if err != nil {
+				return fmt.Errorf("creating workload api client: %w", err)
+			}
+
+			x509Ctx, err := client.FetchX509Context(ctx)
+			if err != nil {
+				return fmt.Errorf("fetching x509 context: %w", err)
+			}
+		},
+		// Hidden for now as the daemon is likely more "usable"
+		Hidden: true,
+	}
+	if err := sf.addFlags(cmd); err != nil {
+		return nil, fmt.Errorf("adding shared flags: %w", err)
+	}
+	return cmd, nil
+}
+
 func newX509CredentialProcessCmd() (*cobra.Command, error) {
-	var (
-		roleARN         string
-		region          string
-		profileARN      string
-		sessionDuration int
-		trustAnchorARN  string
-		roleSessionName string
-		workloadAPIAddr string
-	)
+	sf := &sharedFlags{}
 	cmd := &cobra.Command{
 		Use:   "x509-credential-process",
 		Short: `Exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Compatible with the AWS credential process functionality.`,
@@ -71,7 +129,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			ctx := cmd.Context()
 			client, err := workloadapi.New(
 				ctx,
-				workloadapi.WithAddr(workloadAPIAddr),
+				workloadapi.WithAddr(sf.workloadAPIAddr),
 			)
 			if err != nil {
 				return fmt.Errorf("creating workload api client: %w", err)
@@ -100,12 +158,12 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 				return fmt.Errorf("getting signature algorithm: %w", err)
 			}
 			credentials, err := vendoredaws.GenerateCredentials(&vendoredaws.CredentialsOpts{
-				RoleArn:           roleARN,
-				ProfileArnStr:     profileARN,
-				Region:            region,
-				RoleSessionName:   roleSessionName,
-				TrustAnchorArnStr: trustAnchorARN,
-				SessionDuration:   sessionDuration,
+				RoleArn:           sf.roleARN,
+				ProfileArnStr:     sf.profileARN,
+				Region:            sf.region,
+				RoleSessionName:   sf.roleSessionName,
+				TrustAnchorArnStr: sf.trustAnchorARN,
+				SessionDuration:   sf.sessionDuration,
 			}, signer, signatureAlgorithm)
 			if err != nil {
 				return fmt.Errorf("generating credentials: %w", err)
@@ -126,21 +184,9 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&roleARN, "role-arn", "", "The ARN of the role to assume. Required.")
-	if err := cmd.MarkFlagRequired("role-arn"); err != nil {
-		return nil, fmt.Errorf("marking role-arn flag as required: %w", err)
+	if err := sf.addFlags(cmd); err != nil {
+		return nil, fmt.Errorf("adding shared flags: %w", err)
 	}
-	cmd.Flags().StringVar(&region, "region", "", "Overrides AWS region to use when exchanging the SVID for AWS credentials. Optional.")
-	cmd.Flags().StringVar(&profileARN, "profile-arn", "", "The ARN of the Roles Anywhere profile to use. Required.")
-	if err := cmd.MarkFlagRequired("profile-arn"); err != nil {
-		return nil, fmt.Errorf("marking profile-arn flag as required: %w", err)
-	}
-	cmd.Flags().IntVar(&sessionDuration, "session-duration", 3600, "The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).")
-	cmd.Flags().StringVar(&trustAnchorARN, "trust-anchor-arn", "", "The ARN of the Roles Anywhere trust anchor to use. Required.")
-	if err := cmd.MarkFlagRequired("trust-anchor-arn"); err != nil {
-		return nil, fmt.Errorf("marking trust-anchor-arn flag as required: %w", err)
-	}
-	cmd.Flags().StringVar(&roleSessionName, "role-session-name", "", "The identifier for the role session. Optional.")
-	cmd.Flags().StringVar(&workloadAPIAddr, "workload-api-addr", "", "Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used.")
+
 	return cmd, nil
 }
