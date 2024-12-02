@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/ini.v1"
 )
@@ -21,6 +22,16 @@ type AWSCredentialsFileProfile struct {
 	AWSSessionToken    string
 }
 
+func ensureDirectory(fpath string) error {
+	dpath := filepath.Dir(fpath)
+	if _, err := os.Stat(dpath); os.IsNotExist(err) {
+		if err := os.MkdirAll(dpath, 0700); err != nil {
+			return fmt.Errorf("creating directory (%s): %w", dpath, err)
+		}
+	}
+	return nil
+}
+
 func loadAWSCredentialsFile(
 	log *slog.Logger,
 	cfg AWSCredentialsFileConfig,
@@ -29,13 +40,17 @@ func loadAWSCredentialsFile(
 		return ini.Empty(), nil
 	}
 
+	// Create parent directory for file, should it be needed.
+	if err := ensureDirectory(cfg.Path); err != nil {
+		return nil, fmt.Errorf("ensuring parent directory: %w", err)
+	}
+
 	f, err := ini.Load(cfg.Path)
 	if err == nil {
 		return f, nil
 	}
 
 	// If it doesn't exist, we can "create" it.
-	// TODO: Make directory/parent directories if necessary.
 	if os.IsNotExist(err) {
 		return ini.Empty(), nil
 	}

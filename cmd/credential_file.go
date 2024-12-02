@@ -206,17 +206,29 @@ func daemonX509CredentialFile(
 		}
 		slog.Info("Wrote AWS credentials to file", "path", awsCredentialsPath)
 
+		// Calculate next renewal time as 50% of the remaining time left on the
+		// AWS credentials.
+		// TODO(noah): This is a little crude, it may make more sense to just
+		// renew on a fixed basis (e.g every minute?). We'll go with this
+		// for now, and speak to consumers once it's in use to see if a
+		// different mechanism may be more suitable.
+		now := time.Now()
+		awsTTL := expiresAt.Sub(now)
+		renewIn := awsTTL / 2
+		awsRenewAt := now.Add(renewIn)
+
 		slog.Info(
 			"Sleeping until a new X509 SVID is received or the AWS credentials are close to expiry",
 			"aws_expires_at", expiresAt,
-			"aws_ttl", expiresAt.Sub(time.Now()),
+			"aws_ttl", awsTTL,
+			"aws_renews_at", awsRenewAt,
 			"svid_expires_at", svid.Certificates[0].NotAfter,
-			"svid_ttl", svid.Certificates[0].NotAfter.Sub(time.Now()),
+			"svid_ttl", svid.Certificates[0].NotAfter.Sub(now),
 		)
+
 		select {
-		case <-time.After(time.Second * 10):
+		case <-time.After(time.Until(awsRenewAt)):
 			slog.Info("Triggering renewal as AWS credentials are close to expiry")
-		// TODO: Add case for AWS credential approaching expiry
 		case <-svidUpdate:
 			slog.Debug("Received potential X509 SVID update")
 			newSVID, err := x509Source.GetX509SVID()
