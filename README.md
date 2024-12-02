@@ -82,8 +82,50 @@ $ aws-spiffe-workload-helper x509-credential-process \
 | session-duration  | No       | The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).                                                                       | `3600`                                                                                          |
 | workload-api-addr | No       | Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used. | `unix:///opt/my/path/workload.sock`                                                             |
 
+#### `x509-credential-file`
 
-### Configuring AWS SDKs and CLIs
+The `x509-credential-file` command starts a long-lived daemon which exchanges
+an X509 SVID for a short-lived set of AWS credentials using the AWS Roles
+Anywhere API. It writes the credentials to a specified file in the format 
+supported by AWS SDKs and CLIs as a "credential file".
+
+It repeats this exchange process when the AWS credentials are more than 50% of
+the way through their lifetime, ensuring that a fresh set of credentials are
+always available.
+
+Whilst the `x509-credentials-process` flow should be preferred as it does not 
+cause credentials to be written to the filesystem, the `x509-credentials-file`
+flow may be useful in scenarios where you need to provide credentials to legacy
+SDKs or CLIs that do not support the `credential_process` configuration.
+
+The command fetches the X509-SVID from the SPIFFE Workload API. The location of
+the SPIFFE Workload API endpoint should be specified using the
+`SPIFFE_ENDPOINT_SOCKET` environment variable or the `--workload-api-addr` flag.
+
+```sh
+$ aws-spiffe-workload-helper x509-credential-file \
+    --trust-anchor-arn arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/0000000-0000-0000-0000-000000000000 \
+    --profile-arn arn:aws:rolesanywhere:us-east-1:123456789012:profile/0000000-0000-0000-0000-000000000000 \
+    --role-arn arn:aws:iam::123456789012:role/example-role \
+    --workload-api-addr unix:///opt/workload-api.sock \
+    --aws-credentials-file /opt/my-aws-credentials-file
+```
+
+###### Reference
+
+| Flag                 | Required | Description                                                                                                                                                                              | Example                                                                                         |
+|----------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| role-arn             | Yes      | The ARN of the role to assume. Required.                                                                                                                                                 | `arn:aws:iam::123456789012:role/example-role`                                                   |
+| profile-arn          | Yes      | The ARN of the Roles Anywhere profile to use. Required.                                                                                                                                  | `arn:aws:rolesanywhere:us-east-1:123456789012:profile/0000000-0000-0000-0000-00000000000`       |
+| trust-anchor-arn     | Yes      | The ARN of the Roles Anywhere trust anchor to use. Required.                                                                                                                             | `arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/0000000-0000-0000-0000-000000000000` |
+| region               | No       | Overrides AWS region to use when exchanging the SVID for AWS credentials. Optional.                                                                                                      | `us-east-1`                                                                                     |
+| session-duration     | No       | The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).                                                                       | `3600`                                                                                          |
+| workload-api-addr    | No       | Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used. | `unix:///opt/my/path/workload.sock`                                                             |
+| aws-credentials-path | Yes      | The path to the AWS credentials file to write.                                                                                                                                           | `/opt/my-aws-credentials-file                                                                   |
+| force                | No       | If set, failures loading the existing AWS credentials file will be ignored and the contents overwritten.                                                                                 |                                                                                                 |
+| replace              | No       | If set, the AWS credentials file will be replaced if it exists. This will remove any profiles not written by this tool.                                                                  |                                                                                                 |
+
+## Configuring AWS SDKs and CLIs
 
 To configure AWS SDKs and CLIs to use Roles Anywhere and SPIFFE for
 authentication, you will modify the AWS configuration file.
