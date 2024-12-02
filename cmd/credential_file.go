@@ -18,8 +18,8 @@ func newX509CredentialFileOneshotCmd() (*cobra.Command, error) {
 	sf := &sharedFlags{}
 	cmd := &cobra.Command{
 		Use:   "x509-credential-file-oneshot",
-		Short: ``,
-		Long:  ``,
+		Short: `Exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Writes the credentials to a file in the 'credential file' format expected by the AWS CLI and SDKs.`,
+		Long:  `Exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Writes the credentials to a file in the 'credential file' format expected by the AWS CLI and SDKs.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return oneshotX509CredentialFile(
 				cmd.Context(), force, replace, awsCredentialsPath, sf,
@@ -64,17 +64,19 @@ func oneshotX509CredentialFile(
 		return fmt.Errorf("fetching x509 context: %w", err)
 	}
 	svid := x509Ctx.DefaultSVID()
-	slog.Debug(
+	slog.Info(
 		"Fetched X509 SVID",
-		slog.Group("svid",
-			"spiffe_id", svid.ID,
-			"hint", svid.Hint,
-		),
+		"svid", svidValue(svid),
 	)
 
 	credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
 	if err != nil {
 		return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
+	}
+
+	expiresAt, err := time.Parse(time.RFC3339, credentials.Expiration)
+	if err != nil {
+		return fmt.Errorf("parsing expiration time: %w", err)
 	}
 
 	// Now we write this to disk in the format that the AWS CLI/SDK
@@ -95,7 +97,11 @@ func oneshotX509CredentialFile(
 	if err != nil {
 		return fmt.Errorf("writing credentials to file: %w", err)
 	}
-	slog.Info("Wrote AWS credential to file", "path", "./my-credential")
+	slog.Info(
+		"Wrote AWS credential to file",
+		"path", awsCredentialsPath,
+		"aws_expires_at", expiresAt,
+	)
 	return nil
 }
 
@@ -106,15 +112,13 @@ func newX509CredentialFileCmd() (*cobra.Command, error) {
 	sf := &sharedFlags{}
 	cmd := &cobra.Command{
 		Use:   "x509-credential-file",
-		Short: ``,
-		Long:  ``,
+		Short: `On a regular basis, this daemon exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Writes the credentials to a file in the 'credential file' format expected by the AWS CLI and SDKs.`,
+		Long:  `On a regular basis, this daemon exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Writes the credentials to a file in the 'credential file' format expected by the AWS CLI and SDKs.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return daemonX509CredentialFile(
 				cmd.Context(), force, replace, awsCredentialsPath, sf,
 			)
 		},
-		// Hidden for now as the daemon is likely more "usable"
-		Hidden: true,
 	}
 	if err := sf.addFlags(cmd); err != nil {
 		return nil, fmt.Errorf("adding shared flags: %w", err)
@@ -166,20 +170,20 @@ func daemonX509CredentialFile(
 	if err != nil {
 		return fmt.Errorf("fetching initial X509 SVID: %w", err)
 	}
-	slog.Debug("Fetched initial X509 SVID", slog.Group("svid",
-		"spiffe_id", svid.ID,
-		"hint", svid.Hint,
-		"expires_at", svid.Certificates[0].NotAfter,
-	))
+	slog.Info("Fetched initial X509 SVID", "svid", svidValue(svid))
 
 	for {
-		slog.Debug("Exchanging X509 SVID for AWS credentials")
+		slog.Debug(
+			"Exchanging X509 SVID for AWS credentials",
+			"svid", svidValue(svid),
+		)
 		credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
 		if err != nil {
 			return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
 		}
 		slog.Info(
 			"Successfully exchanged X509 SVID for AWS credentials",
+			"svid", svidValue(svid),
 		)
 
 		expiresAt, err := time.Parse(time.RFC3339, credentials.Expiration)
@@ -237,11 +241,7 @@ func daemonX509CredentialFile(
 			}
 			slog.Info(
 				"Received new X509 SVID from Workload API, will update AWS credentials",
-				slog.Group("svid",
-					"spiffe_id", newSVID.ID,
-					"hint", newSVID.Hint,
-					"expires_at", newSVID.Certificates[0].NotAfter,
-				),
+				"svid", svidValue(svid),
 			)
 			svid = newSVID
 		case <-ctx.Done():

@@ -122,3 +122,11 @@ func exchangeX509SVIDForAWSCredentials(
 	)
 	return credentials, nil
 }
+
+func svidValue(svid *x509svid.SVID) slog.Value {
+	return slog.GroupValue(
+		slog.String("id", svid.ID.String()),
+		slog.String("hint", svid.Hint),
+		slog.Time("expires_at", svid.Certificates[0].NotAfter),
+	)
+}

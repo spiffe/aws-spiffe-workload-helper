@@ -38,13 +38,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			// TODO(strideynet): Implement SVID selection mechanism, for now,
 			// we'll just use the first returned SVID (a.k.a the default).
 			svid := x509Ctx.DefaultSVID()
-			slog.Debug(
-				"Fetched X509 SVID",
-				slog.Group("svid",
-					"spiffe_id", svid.ID,
-					"hint", svid.Hint,
-				),
-			)
+			slog.Debug("Fetched X509 SVID", "svid", svidValue(svid))
 
 			credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
 			if err != nil {
