@@ -49,6 +49,7 @@ func oneshotX509CredentialFile(
 	client, err := workloadapi.New(
 		ctx,
 		workloadapi.WithAddr(sf.workloadAPIAddr),
+		workloadapi.WithLogger(internal.NewSPIFFESlogAdapter(slog.Default())),
 	)
 	if err != nil {
 		return fmt.Errorf("creating workload api client: %w", err)
@@ -144,6 +145,7 @@ func daemonX509CredentialFile(
 	client, err := workloadapi.New(
 		ctx,
 		workloadapi.WithAddr(sf.workloadAPIAddr),
+		workloadapi.WithLogger(internal.NewSPIFFESlogAdapter(slog.Default())),
 	)
 	if err != nil {
 		return fmt.Errorf("creating workload api client: %w", err)
