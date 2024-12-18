@@ -108,7 +108,7 @@ $ aws-spiffe-workload-helper x509-credential-file \
     --profile-arn arn:aws:rolesanywhere:us-east-1:123456789012:profile/0000000-0000-0000-0000-000000000000 \
     --role-arn arn:aws:iam::123456789012:role/example-role \
     --workload-api-addr unix:///opt/workload-api.sock \
-    --aws-credentials-file /opt/my-aws-credentials-file
+    --aws-credentials-path /opt/my-aws-credentials-file
 ```
 
 ###### Reference
@@ -121,7 +121,7 @@ $ aws-spiffe-workload-helper x509-credential-file \
 | region               | No       | Overrides AWS region to use when exchanging the SVID for AWS credentials. Optional.                                                                                                      | `us-east-1`                                                                                     |
 | session-duration     | No       | The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).                                                                       | `3600`                                                                                          |
 | workload-api-addr    | No       | Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used. | `unix:///opt/my/path/workload.sock`                                                             |
-| aws-credentials-path | Yes      | The path to the AWS credentials file to write.                                                                                                                                           | `/opt/my-aws-credentials-file                                                                   |
+| aws-credentials-path | Yes      | The path to the AWS credentials file to write.                                                                                                                                           | `/opt/my-aws-credentials-file`                                                                  |
 | force                | No       | If set, failures loading the existing AWS credentials file will be ignored and the contents overwritten.                                                                                 |                                                                                                 |
 | replace              | No       | If set, the AWS credentials file will be replaced if it exists. This will remove any profiles not written by this tool.                                                                  |                                                                                                 |
 
