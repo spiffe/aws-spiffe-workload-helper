@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spiffe/aws-spiffe-workload-helper/internal"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
@@ -21,6 +22,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			client, err := workloadapi.New(
 				ctx,
 				workloadapi.WithAddr(sf.workloadAPIAddr),
+				workloadapi.WithLogger(internal.NewSPIFFESlogAdapter(slog.Default())),
 			)
 			if err != nil {
 				return fmt.Errorf("creating workload api client: %w", err)
