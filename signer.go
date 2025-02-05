@@ -110,7 +110,7 @@ func (s *X509SVIDSigner) Certificate() (*x509.Certificate, error) {
 // the trust anchor.
 // Implements the aws_signing_helper.Signer interface.
 func (s *X509SVIDSigner) CertificateChain() ([]*x509.Certificate, error) {
-	if len(s.SVID.Certificates) < 1 {
+	if len(s.SVID.Certificates) > 1 {
 		return s.SVID.Certificates[1:], nil
 	}
 	return nil, nil
