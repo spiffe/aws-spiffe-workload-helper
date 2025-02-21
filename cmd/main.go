@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	awsspiffe "github.com/spiffe/aws-spiffe-workload-helper"
-	"github.com/spiffe/aws-spiffe-workload-helper/internal/vendoredaws"
+	"github.com/spiffe/aws-spiffe-workload-helper/vendoredaws"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 )
 
