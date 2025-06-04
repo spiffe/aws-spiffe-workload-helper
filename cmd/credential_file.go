@@ -15,7 +15,7 @@ func newX509CredentialFileOneshotCmd() (*cobra.Command, error) {
 	force := false
 	replace := false
 	awsCredentialsPath := ""
-	sf := &sharedFlags{}
+	sf := &sharedX509Flags{}
 	cmd := &cobra.Command{
 		Use:   "x509-credential-file-oneshot",
 		Short: `Exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Writes the credentials to a file in the 'credential file' format expected by the AWS CLI and SDKs.`,
@@ -44,7 +44,7 @@ func oneshotX509CredentialFile(
 	force bool,
 	replace bool,
 	awsCredentialsPath string,
-	sf *sharedFlags,
+	sf *sharedX509Flags,
 ) error {
 	client, err := workloadapi.New(
 		ctx,
@@ -110,7 +110,7 @@ func newX509CredentialFileCmd() (*cobra.Command, error) {
 	force := false
 	replace := false
 	awsCredentialsPath := ""
-	sf := &sharedFlags{}
+	sf := &sharedX509Flags{}
 	cmd := &cobra.Command{
 		Use:   "x509-credential-file",
 		Short: `On a regular basis, this daemon exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Writes the credentials to a file in the 'credential file' format expected by the AWS CLI and SDKs.`,
@@ -139,7 +139,7 @@ func daemonX509CredentialFile(
 	force bool,
 	replace bool,
 	awsCredentialsPath string,
-	sf *sharedFlags,
+	sf *sharedX509Flags,
 ) error {
 	slog.Info("Starting AWS credential file daemon")
 	client, err := workloadapi.New(

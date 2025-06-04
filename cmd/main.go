@@ -1,13 +1,18 @@
 package main
 
 import (
+	"encoding/xml"
 	"fmt"
+	"io/ioutil"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/spf13/cobra"
 	awsspiffe "github.com/spiffe/aws-spiffe-workload-helper"
 	"github.com/spiffe/aws-spiffe-workload-helper/vendoredaws"
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 )
 
@@ -61,10 +66,16 @@ func newRootCmd() (*cobra.Command, error) {
 	}
 	rootCmd.AddCommand(x509CredentialFileOneshotCmd)
 
+	JWTCredentialProcessCmd, err := newJWTCredentialProcessCmd()
+	if err != nil {
+		return nil, fmt.Errorf("initializing jwt-credential-process command: %w", err)
+	}
+	rootCmd.AddCommand(JWTCredentialProcessCmd)
+
 	return rootCmd, nil
 }
 
-type sharedFlags struct {
+type sharedX509Flags struct {
 	roleARN         string
 	region          string
 	profileARN      string
@@ -74,7 +85,7 @@ type sharedFlags struct {
 	workloadAPIAddr string
 }
 
-func (f *sharedFlags) addFlags(cmd *cobra.Command) error {
+func (f *sharedX509Flags) addFlags(cmd *cobra.Command) error {
 	cmd.Flags().StringVar(&f.roleARN, "role-arn", "", "The ARN of the role to assume. Required.")
 	if err := cmd.MarkFlagRequired("role-arn"); err != nil {
 		return fmt.Errorf("marking role-arn flag as required: %w", err)
@@ -94,8 +105,29 @@ func (f *sharedFlags) addFlags(cmd *cobra.Command) error {
 	return nil
 }
 
+type sharedJWTFlags struct {
+	audience        string
+	endpoint        string
+	sessionDuration int
+	workloadAPIAddr string
+}
+
+func (f *sharedJWTFlags) addFlags(cmd *cobra.Command) error {
+	cmd.Flags().StringVar(&f.audience, "audience", "", "Sets what audience will be used for the JWT. Required.")
+	if err := cmd.MarkFlagRequired("audience"); err != nil {
+		return fmt.Errorf("marking audience flag as required: %w", err)
+	}
+	cmd.Flags().StringVar(&f.endpoint, "endpoint", "", "The URL of the IAM endpoint. Required.")
+	if err := cmd.MarkFlagRequired("endpoint"); err != nil {
+		return fmt.Errorf("marking endpoint flag as required: %w", err)
+	}
+	cmd.Flags().IntVar(&f.sessionDuration, "session-duration", 3600, "The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).")
+	cmd.Flags().StringVar(&f.workloadAPIAddr, "workload-api-addr", "", "Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used.")
+	return nil
+}
+
 func exchangeX509SVIDForAWSCredentials(
-	sf *sharedFlags,
+	sf *sharedX509Flags,
 	svid *x509svid.SVID,
 ) (vendoredaws.CredentialProcessOutput, error) {
 	signer := &awsspiffe.X509SVIDSigner{
@@ -123,10 +155,86 @@ func exchangeX509SVIDForAWSCredentials(
 	return credentials, nil
 }
 
+type AssumeRoleWithWebIdentityResponse struct {
+	XMLName                         xml.Name                        `xml:"https://sts.amazonaws.com/doc/2011-06-15/ AssumeRoleWithWebIdentityResponse"`
+	AssumeRoleWithWebIdentityResult AssumeRoleWithWebIdentityResult `xml:"AssumeRoleWithWebIdentityResult"`
+	ResponseMetadata                struct{}                        `xml:"ResponseMetadata"` // Empty struct if no fields are needed
+}
+
+type AssumeRoleWithWebIdentityResult struct {
+	AssumedRoleUser AssumedRoleUser `xml:"AssumedRoleUser"`
+	Credentials     Credentials     `xml:"Credentials"`
+}
+
+type AssumedRoleUser struct {
+	Arn          string `xml:"Arn"`
+	AssumeRoleId string `xml:"AssumeRoleId"`
+}
+
+type Credentials struct {
+	AccessKeyId     string `xml:"AccessKeyId"`
+	SecretAccessKey string `xml:"SecretAccessKey"`
+	Expiration      string `xml:"Expiration"`
+	SessionToken    string `xml:"SessionToken"`
+}
+
+func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (vendoredaws.CredentialProcessOutput, error) {
+	cpo := vendoredaws.CredentialProcessOutput{}
+	token := svid.Marshal()
+	u, err := url.Parse(sf.endpoint)
+	if err != nil {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error parsing URL: %v", err)
+	}
+	queryParams := u.Query()
+	queryParams.Add("Action", "AssumeRoleWithWebIdentity")
+	queryParams.Add("WebIdentityToken", token)
+	queryParams.Add("Version", "2011-06-15")
+	queryParams.Add("DurationSeconds", fmt.Sprintf("%d", sf.sessionDuration))
+	u.RawQuery = queryParams.Encode()
+	req, err := http.NewRequest("POST", u.String(), nil)
+	if err != nil {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error making new request: %v", err)
+	}
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error performing the sts request: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error reading response: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error performing the sts request: %d: %s: %s", resp.StatusCode, http.StatusText(resp.StatusCode), body)
+	}
+	var stsResponse AssumeRoleWithWebIdentityResponse
+	err = xml.Unmarshal(body, &stsResponse)
+	if err != nil {
+		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error parsing xml respopse: %v", err)
+	}
+	cpo = vendoredaws.CredentialProcessOutput{
+		Version:         1,
+		AccessKeyId:     stsResponse.AssumeRoleWithWebIdentityResult.Credentials.AccessKeyId,
+		SecretAccessKey: stsResponse.AssumeRoleWithWebIdentityResult.Credentials.SecretAccessKey,
+		SessionToken:    stsResponse.AssumeRoleWithWebIdentityResult.Credentials.SessionToken,
+		Expiration:      stsResponse.AssumeRoleWithWebIdentityResult.Credentials.Expiration,
+	}
+	return cpo, nil
+}
+
 func svidValue(svid *x509svid.SVID) slog.Value {
 	return slog.GroupValue(
 		slog.String("id", svid.ID.String()),
 		slog.String("hint", svid.Hint),
 		slog.Time("expires_at", svid.Certificates[0].NotAfter),
+	)
+}
+
+func jwtSVIDValue(svid *jwtsvid.SVID) slog.Value {
+	return slog.GroupValue(
+		slog.String("id", svid.ID.String()),
+		slog.String("hint", svid.Hint),
+		slog.Time("expires_at", svid.Expiry),
 	)
 }

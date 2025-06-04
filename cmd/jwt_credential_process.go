@@ -8,15 +8,16 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spiffe/aws-spiffe-workload-helper/internal"
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
-func newX509CredentialProcessCmd() (*cobra.Command, error) {
-	sf := &sharedFlags{}
+func newJWTCredentialProcessCmd() (*cobra.Command, error) {
+	sf := &sharedJWTFlags{}
 	cmd := &cobra.Command{
-		Use:   "x509-credential-process",
-		Short: `Exchanges an X509 SVID for a short-lived set of AWS credentials using AWS Roles Anywhere. Compatible with the AWS credential process functionality.`,
-		Long:  `Exchanges an X509 SVID for a short-lived set of AWS credentials using the AWS Roles Anywhere API. It returns the credentials to STDOUT, in the format expected by AWS SDKs and CLIs when invoking an external credential process.`,
+		Use:   "jwt-credential-process",
+		Short: `Exchanges an JWT SVID for a short-lived set of AWS credentials using AWS AssumeRoleWithWebIdentity. Compatible with the AWS credential process functionality.`,
+		Long:  `Exchanges an JWT SVID for a short-lived set of AWS credentials using AWS AssumeRoleWithWebIdentity. It returns the credentials to STDOUT, in the format expected by AWS SDKs and CLIs when invoking an external credential process.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			client, err := workloadapi.New(
@@ -33,18 +34,20 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 				}
 			}()
 
-			x509Ctx, err := client.FetchX509Context(ctx)
+			params := jwtsvid.Params{
+				Audience: sf.audience,
+			}
+			svid, err := client.FetchJWTSVID(ctx, params)
 			if err != nil {
-				return fmt.Errorf("fetching x509 context: %w", err)
+				return fmt.Errorf("fetching jwt: %w", err)
 			}
 			// TODO(strideynet): Implement SVID selection mechanism, for now,
 			// we'll just use the first returned SVID (a.k.a the default).
-			svid := x509Ctx.DefaultSVID()
-			slog.Debug("Fetched X509 SVID", "svid", svidValue(svid))
+			slog.Debug("Fetched JWT SVID", "svid", jwtSVIDValue(svid))
 
-			credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
+			credentials, err := exchangeJWTSVIDForAWSCredentials(sf, svid)
 			if err != nil {
-				return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
+				return fmt.Errorf("exchanging JWT SVID for AWS credentials: %w", err)
 			}
 
 			out, err := json.Marshal(credentials)
