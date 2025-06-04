@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -179,7 +179,6 @@ type Credentials struct {
 }
 
 func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (vendoredaws.CredentialProcessOutput, error) {
-	cpo := vendoredaws.CredentialProcessOutput{}
 	token := svid.Marshal()
 	u, err := url.Parse(sf.endpoint)
 	if err != nil {
@@ -201,7 +200,7 @@ func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (v
 		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error performing the sts request: %v", err)
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error reading response: %v", err)
 	}
@@ -213,7 +212,7 @@ func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (v
 	if err != nil {
 		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error parsing xml respopse: %v", err)
 	}
-	cpo = vendoredaws.CredentialProcessOutput{
+	cpo := vendoredaws.CredentialProcessOutput{
 		Version:         1,
 		AccessKeyId:     stsResponse.AssumeRoleWithWebIdentityResult.Credentials.AccessKeyId,
 		SecretAccessKey: stsResponse.AssumeRoleWithWebIdentityResult.Credentials.SecretAccessKey,
