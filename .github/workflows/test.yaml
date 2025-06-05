@@ -30,6 +30,7 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.61
+          args: --exclude-dirs=vendoredaws
   test:
     runs-on: ubuntu-latest
     permissions:
