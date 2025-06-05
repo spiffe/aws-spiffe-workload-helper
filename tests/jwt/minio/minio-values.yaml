@@ -1,0 +1,16 @@
+provisioning:
+  enabled: true
+  buckets:
+  - name: data
+  policies:
+  - name: data-test-rw
+    statements:
+    - resources:
+      - "arn:aws:s3:::data/test/*"
+      actions:
+      - "s3:PutObject"
+      - "s3:GetObject"
+      effect: "Allow"
+  extraCommands:
+    #- mc idp openid remove provisioning "spire" || true
+    - mc idp openid add provisioning "spire" client_id=minio client_secret=doesntmatternotreal config_url="http://spire-spiffe-oidc-discovery-provider.spire-server/.well-known/openid-configuration" scopes="openid,groups"

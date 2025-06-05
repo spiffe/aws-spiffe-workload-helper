@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+env:
+  HELM_VERSION: v3.16.2
+  KIND_VERSION: v0.24.0
+  K8S_VERSION: v1.33.1
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -42,3 +47,33 @@ jobs:
           go-version-file: 'go.mod'
       - name: Run Tests
         run: go test -v -race -shuffle=on -coverprofile=coverage.txt ./...
+
+  integration:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Set up Helm
+        uses: azure/setup-helm@v3.5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Create kind ${{ env.K8S_VERSION }} cluster
+        uses: helm/kind-action@v1.9.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          node_image: kindest/node:${{ env.K8S_VERSION }}
+          verbosity: 1
+      - name: Setup services
+        run: ./tests/jwt/minio/setup.sh
+      - name: Run tests
+        run: ./tests/jwt/minio/test.sh
