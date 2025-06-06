@@ -20,7 +20,7 @@ spire-server:
             attributes: spire.plugin.server.credentialcomposer.v1.JWTSVIDAttributes{
               claims: request.attributes.claims.mapOverrideEntries(
                 request.spiffe_id.startsWith(spiffe_trust_domain + "/minio/")?
-                  {'policy': [request.spiffe_id.substring(spiffe_trust_domain.size() + 7)], 'azp': 'minio'}:
+                  {'policy': [request.spiffe_id.substring(spiffe_trust_domain.size() + 7)]}:
                   {}
               )
             }
