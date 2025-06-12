@@ -81,6 +81,6 @@ jobs:
           node_image: kindest/node:${{ env.K8S_VERSION }}
           verbosity: 1
       - name: Setup services
-        run: ./tests/jwt/${{ matrix.k8s }/setup.sh
+        run: ./tests/jwt/${{ matrix.k8s }}/setup.sh
       - name: Run tests
         run: ./tests/jwt/${{ matrix.k8s }}/test.sh
