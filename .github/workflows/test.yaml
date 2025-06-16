@@ -55,6 +55,12 @@ jobs:
       contents: read
       pull-requests: read
       checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - minio-policy
+          - minio-rolearn
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,6 +81,6 @@ jobs:
           node_image: kindest/node:${{ env.K8S_VERSION }}
           verbosity: 1
       - name: Setup services
-        run: ./tests/jwt/minio/setup.sh
+        run: ./tests/jwt/${{ matrix.test }}/setup.sh
       - name: Run tests
-        run: ./tests/jwt/minio/test.sh
+        run: ./tests/jwt/${{ matrix.test }}/test.sh
