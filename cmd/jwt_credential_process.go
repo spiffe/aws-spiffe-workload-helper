@@ -37,9 +37,23 @@ func newJWTCredentialProcessCmd() (*cobra.Command, error) {
 			params := jwtsvid.Params{
 				Audience: sf.audience,
 			}
-			svid, err := client.FetchJWTSVID(ctx, params)
+			svids, err := client.FetchJWTSVIDs(ctx, params)
 			if err != nil {
 				return fmt.Errorf("fetching jwt: %w", err)
+			}
+			svid := svids[0]
+			if sf.hint != "" {
+				found := false
+				for _, s := range svids {
+					if s.Hint == sf.hint {
+						found = true
+						svid = s
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("could not find the specified SVID")
+				}
 			}
 			// TODO(strideynet): Implement SVID selection mechanism, for now,
 			// we'll just use the first returned SVID (a.k.a the default).

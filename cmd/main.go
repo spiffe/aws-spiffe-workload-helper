@@ -111,6 +111,7 @@ type sharedJWTFlags struct {
 	endpoint        string
 	sessionDuration int
 	workloadAPIAddr string
+	hint            string
 }
 
 func (f *sharedJWTFlags) addFlags(cmd *cobra.Command) error {
@@ -125,6 +126,7 @@ func (f *sharedJWTFlags) addFlags(cmd *cobra.Command) error {
 	cmd.Flags().IntVar(&f.sessionDuration, "session-duration", 3600, "The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).")
 	cmd.Flags().StringVar(&f.workloadAPIAddr, "workload-api-addr", "", "Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used.")
 	cmd.Flags().StringVar(&f.roleARN, "role-arn", "", "The ARN of the role to assume.")
+	cmd.Flags().StringVar(&f.hint, "hint", "", "Hint to use to find the SVID.")
 	return nil
 }
 
