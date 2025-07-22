@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spiffe/aws-spiffe-workload-helper/internal"
@@ -43,17 +44,21 @@ func newJWTCredentialProcessCmd() (*cobra.Command, error) {
 			}
 			svid := svids[0]
 			if sf.hint != "" {
+				hints := make([]string, len(svids))
 				found := false
-				for _, s := range svids {
+				for i, s := range svids {
 					if s.Hint == sf.hint {
 						found = true
 						svid = s
 						break
 					}
+					hints[i] = s.Hint
 				}
 				if !found {
-					return fmt.Errorf("could not find the specified SVID")
+					return fmt.Errorf("could not find the specified SVID. Available hints [%s]", strings.Join(hints, ", "))
 				}
+			} else if len(svids) > 1 {
+				slog.Warn("Received multiple SVIDs, but, no hint matcher was set. Selecting the first SVID.")
 			}
 			// TODO(strideynet): Implement SVID selection mechanism, for now,
 			// we'll just use the first returned SVID (a.k.a the default).
