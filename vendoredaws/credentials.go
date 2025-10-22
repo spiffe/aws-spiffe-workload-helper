@@ -1,18 +1,19 @@
 package vendoredaws
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"log"
 	"net/http"
-	"runtime"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/arn"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/rolesanywhere-credential-helper/rolesanywhere"
+	"github.com/aws/smithy-go/middleware"
 )
 
 type CredentialsOpts struct {
@@ -56,35 +57,30 @@ func GenerateCredentials(opts *CredentialsOpts, signer Signer, signatureAlgorith
 		opts.Region = trustAnchorArn.Region
 	}
 
-	mySession := session.Must(session.NewSession())
-
-	var logLevel aws.LogLevelType
+	var logMode aws.ClientLogMode = 0
 	if Debug {
-		logLevel = aws.LogDebug
-	} else {
-		logLevel = aws.LogOff
+		logMode = aws.LogSigning | aws.LogRetries | aws.LogRequestWithBody | aws.LogResponseWithBody | aws.LogRequestEventMessage | aws.LogResponseEventMessage
 	}
 
-	var tr *http.Transport
-	if opts.WithProxy {
-		tr = &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: opts.NoVerifySSL},
-			Proxy:           http.ProxyFromEnvironment,
+	// Custom HTTP client with proxy and TLS settings
+	httpClient := awshttp.NewBuildableClient().WithTransportOptions(func(tr *http.Transport) {
+		tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: opts.NoVerifySSL}
+		if opts.WithProxy {
+			tr.Proxy = http.ProxyFromEnvironment
 		}
-	} else {
-		tr = &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: opts.NoVerifySSL},
-		}
+	})
+	ctx := context.TODO()
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(opts.Region), config.WithHTTPClient(httpClient), config.WithClientLogMode(logMode))
+	if err != nil {
+		return CredentialProcessOutput{}, err
 	}
-	client := &http.Client{Transport: tr}
-	config := aws.NewConfig().WithRegion(opts.Region).WithHTTPClient(client).WithLogLevel(logLevel)
+
+	// Override endpoint if specified
 	if opts.Endpoint != "" {
-		config.WithEndpoint(opts.Endpoint)
+		cfg.BaseEndpoint = aws.String(opts.Endpoint)
 	}
-	rolesAnywhereClient := rolesanywhere.New(mySession, config)
-	rolesAnywhereClient.Handlers.Build.RemoveByName("core.SDKVersionUserAgentHandler")
-	rolesAnywhereClient.Handlers.Build.PushBackNamed(request.NamedHandler{Name: "v4x509.CredHelperUserAgentHandler", Fn: request.MakeAddToUserAgentHandler("CredHelper", opts.Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)})
-	rolesAnywhereClient.Handlers.Sign.Clear()
+
+	// Add custom request signer, implementing SigV4-X509
 	certificate, err := signer.Certificate()
 	if err != nil {
 		return CredentialProcessOutput{}, errors.New("unable to find certificate")
@@ -96,10 +92,21 @@ func GenerateCredentials(opts *CredentialsOpts, signer Signer, signatureAlgorith
 			log.Println(err)
 		}
 	}
-	rolesAnywhereClient.Handlers.Sign.PushBackNamed(request.NamedHandler{Name: "v4x509.SignRequestHandler", Fn: CreateRequestSignFunction(signer, signatureAlgorithm, certificate, certificateChain)})
+	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
+		// Remove middleware related to SigV4 signing
+		stack.Finalize.Remove("Signing")
+		stack.Finalize.Remove("setLegacyContextSigningOptions")
+		stack.Finalize.Remove("GetIdentity")
+		// Add middleware for SigV4-X509 signing
+		stack.Finalize.Add(middleware.FinalizeMiddlewareFunc("Signing", CreateRequestSignFinalizeFunction(signer, opts.Region, signatureAlgorithm, certificate, certificateChain)), middleware.After)
+		return nil
+	})
+
+	// Create the Roles Anywhere client using the above-constructed Config
+	rolesAnywhereClient := rolesanywhere.NewFromConfig(cfg)
 
 	certificateStr := base64.StdEncoding.EncodeToString(certificate.Raw)
-	durationSeconds := int64(opts.SessionDuration)
+	durationSeconds := int32(opts.SessionDuration)
 	createSessionRequest := rolesanywhere.CreateSessionInput{
 		Cert:               &certificateStr,
 		ProfileArn:         &opts.ProfileArnStr,
@@ -112,7 +119,7 @@ func GenerateCredentials(opts *CredentialsOpts, signer Signer, signatureAlgorith
 	if opts.RoleSessionName != "" {
 		createSessionRequest.RoleSessionName = &opts.RoleSessionName
 	}
-	output, err := rolesAnywhereClient.CreateSession(&createSessionRequest)
+	output, err := rolesAnywhereClient.CreateSession(ctx, &createSessionRequest)
 	if err != nil {
 		return CredentialProcessOutput{}, err
 	}

@@ -2,10 +2,12 @@ package vendoredaws
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/asn1"
@@ -19,13 +21,16 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/request"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"golang.org/x/crypto/pkcs12"
+	"golang.org/x/term"
 )
 
 type SignerParams struct {
@@ -55,6 +60,9 @@ var (
 		"Trust",
 		"CA",
 	}
+
+	// Signing name for the IAM Roles Anywhere service
+	ROLESANYWHERE_SIGNING_NAME = "rolesanywhere"
 )
 
 // Interface that all signers will have to implement
@@ -97,6 +105,8 @@ type CredentialProcessOutput struct {
 }
 
 type CertificateContainer struct {
+	// Index (can be useful in sorting)
+	Index int
 	// Certificate data
 	Cert *x509.Certificate
 	// Certificate URI (only populated in the case that the certificate is a PKCS#11 object)
@@ -126,6 +136,159 @@ var ignoredHeaderKeys = map[string]bool{
 }
 
 var Debug bool = false
+
+// Prompts the user for their password
+func GetPassword(ttyReadFile *os.File, ttyWriteFile *os.File, prompt string, parseErrMsg string) (string, error) {
+	fmt.Fprintln(ttyWriteFile, prompt)
+	passwordBytes, err := term.ReadPassword(int(ttyReadFile.Fd()))
+	if err != nil {
+		return "", errors.New(parseErrMsg)
+	}
+
+	password := string(passwordBytes[:])
+	strings.Replace(password, "\r", "", -1) // Remove CR
+	return password, nil
+}
+
+type PasswordPromptProps struct {
+	InitialPassword                    string
+	NoPassword                         bool
+	CheckPassword                      func(string) (interface{}, error)
+	IncorrectPasswordMsg               string
+	Prompt                             string
+	Reprompt                           string
+	ParseErrMsg                        string
+	CheckPasswordAuthorizationErrorMsg string
+}
+
+func PasswordPrompt(passwordPromptInput PasswordPromptProps) (string, interface{}, error) {
+	var (
+		err                                error
+		ttyReadPath                        string
+		ttyWritePath                       string
+		ttyReadFile                        *os.File
+		ttyWriteFile                       *os.File
+		parseErrMsg                        string
+		prompt                             string
+		reprompt                           string
+		password                           string
+		incorrectPasswordMsg               string
+		checkPasswordAuthorizationErrorMsg string
+		checkPassword                      func(string) (interface{}, error)
+		checkPasswordResult                interface{}
+		noPassword                         bool
+	)
+
+	password = passwordPromptInput.InitialPassword
+	noPassword = passwordPromptInput.NoPassword
+	incorrectPasswordMsg = passwordPromptInput.IncorrectPasswordMsg
+	prompt = passwordPromptInput.Prompt
+	reprompt = passwordPromptInput.Reprompt
+	parseErrMsg = passwordPromptInput.ParseErrMsg
+	checkPassword = passwordPromptInput.CheckPassword
+	checkPasswordAuthorizationErrorMsg = passwordPromptInput.CheckPasswordAuthorizationErrorMsg
+
+	ttyReadPath = "/dev/tty"
+	ttyWritePath = ttyReadPath
+	if runtime.GOOS == "windows" {
+		ttyReadPath = "CONIN$"
+		ttyWritePath = "CONOUT$"
+	}
+
+	// If no password is required
+	if noPassword {
+		checkPasswordResult, err = checkPassword("")
+		if err != nil {
+			return "", nil, err
+		}
+		return "", checkPasswordResult, nil
+	}
+
+	// If the password was provided explicitly, beforehand
+	if password != "" {
+		checkPasswordResult, err = checkPassword(password)
+		if err != nil {
+			return "", nil, errors.New(incorrectPasswordMsg)
+		}
+		return password, checkPasswordResult, nil
+	}
+
+	ttyReadFile, err = os.OpenFile(ttyReadPath, os.O_RDWR, 0)
+	if err != nil {
+		return "", nil, errors.New(parseErrMsg)
+	}
+	defer ttyReadFile.Close()
+
+	ttyWriteFile, err = os.OpenFile(ttyWritePath, os.O_WRONLY, 0)
+	if err != nil {
+		return "", nil, errors.New(parseErrMsg)
+	}
+	defer ttyWriteFile.Close()
+
+	// The key has a password, so prompt for it
+	password, err = GetPassword(ttyReadFile, ttyWriteFile, prompt, parseErrMsg)
+	if err != nil {
+		return "", nil, err
+	}
+	checkPasswordResult, err = checkPassword(password)
+	for true {
+		// If we've found the right password, return both it and the result of `checkPassword`
+		if err == nil {
+			return password, checkPasswordResult, nil
+		}
+		// Otherwise, if the password was incorrect, prompt for it again
+		if strings.Contains(err.Error(), checkPasswordAuthorizationErrorMsg) {
+			password, err = GetPassword(ttyReadFile, ttyWriteFile, reprompt, parseErrMsg)
+			if err != nil {
+				return "", nil, err
+			}
+			checkPasswordResult, err = checkPassword(password)
+			continue
+		}
+		return "", nil, err
+	}
+
+	return "", nil, err
+}
+
+// Default function to showcase certificate information
+func DefaultCertContainerToString(certContainer CertificateContainer) string {
+	var certStr string
+
+	cert := certContainer.Cert
+
+	fingerprint := sha1.Sum(cert.Raw) // nosemgrep
+	fingerprintHex := hex.EncodeToString(fingerprint[:])
+	serialHexUpper := strings.ToUpper(cert.SerialNumber.Text(16))
+	certStr = fmt.Sprintf("Hex Fingerprint: %s\n", fingerprintHex)
+	certStr += fmt.Sprintf("Subject: %s\n", cert.Subject.String())
+	certStr += fmt.Sprintf("Issuer: %s\n", cert.Issuer.String())
+	certStr += fmt.Sprintf("Serial Number: %s\n", serialHexUpper)
+
+	// Only for PKCS#11
+	if certContainer.Uri != "" {
+		certStr += fmt.Sprintf("URI: %s\n", certContainer.Uri)
+	}
+
+	certStr += "\n"
+
+	return certStr
+}
+
+// CertificateContainerList implements the sort.Interface interface
+type CertificateContainerList []CertificateContainer
+
+func (certificateContainerList CertificateContainerList) Less(i, j int) bool {
+	return certificateContainerList[i].Cert.NotAfter.Before(certificateContainerList[j].Cert.NotAfter)
+}
+
+func (certificateContainerList CertificateContainerList) Swap(i, j int) {
+	certificateContainerList[i], certificateContainerList[j] = certificateContainerList[j], certificateContainerList[i]
+}
+
+func (certificateContainerList CertificateContainerList) Len() int {
+	return len(certificateContainerList)
+}
 
 // Find whether the current certificate matches the CertIdentifier
 func certMatches(certIdentifier CertIdentifier, cert x509.Certificate) bool {
@@ -205,75 +368,46 @@ func certificateChainToString(certificateChain []*x509.Certificate) string {
 	return x509ChainString.String()
 }
 
-func CreateRequestSignFunction(signer crypto.Signer, signingAlgorithm string, certificate *x509.Certificate, certificateChain []*x509.Certificate) func(*request.Request) {
-	return func(req *request.Request) {
-		region := req.ClientInfo.SigningRegion
-		if region == "" {
-			region = aws.StringValue(req.Config.Region)
+func CreateRequestSignFinalizeFunction(signer crypto.Signer, signingRegion string, signingAlgorithm string, certificate *x509.Certificate, certificateChain []*x509.Certificate) func(context.Context, middleware.FinalizeInput, middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+	return func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (out middleware.FinalizeOutput, metadata middleware.Metadata, err error) {
+		req, ok := in.Request.(*smithyhttp.Request)
+		if !ok {
+			return out, metadata, errors.New(fmt.Sprintf("unexpected request middleware type %T", in.Request))
 		}
 
-		name := req.ClientInfo.SigningName
-		if name == "" {
-			name = req.ClientInfo.ServiceName
-		}
+		payloadHash := v4.GetPayloadHash(ctx)
+		signRequest(signer, signingRegion, signingAlgorithm, certificate, certificateChain, req.Request, payloadHash)
 
-		signerParams := SignerParams{time.Now(), region, name, signingAlgorithm}
-
-		// Set headers that are necessary for signing
-		req.HTTPRequest.Header.Set(host, req.HTTPRequest.URL.Host)
-		req.HTTPRequest.Header.Set(x_amz_date, signerParams.GetFormattedSigningDateTime())
-		req.HTTPRequest.Header.Set(x_amz_x509, certificateToString(certificate))
-		if certificateChain != nil {
-			req.HTTPRequest.Header.Set(x_amz_x509_chain, certificateChainToString(certificateChain))
-		}
-
-		contentSha256 := calculateContentHash(req.HTTPRequest, req.Body)
-		if req.HTTPRequest.Header.Get(x_amz_content_sha256) == "required" {
-			req.HTTPRequest.Header.Set(x_amz_content_sha256, contentSha256)
-		}
-
-		canonicalRequest, signedHeadersString := createCanonicalRequest(req.HTTPRequest, req.Body, contentSha256)
-
-		stringToSign := CreateStringToSign(canonicalRequest, signerParams)
-		signatureBytes, err := signer.Sign(rand.Reader, []byte(stringToSign), crypto.SHA256)
-		if err != nil {
-			log.Println(err.Error())
-			os.Exit(1)
-		}
-		signature := hex.EncodeToString(signatureBytes)
-
-		req.HTTPRequest.Header.Set(authorization, BuildAuthorizationHeader(req.HTTPRequest, req.Body, signedHeadersString, signature, certificate, signerParams))
-		req.SignedHeaderVals = req.HTTPRequest.Header
+		return next.HandleFinalize(ctx, in)
 	}
 }
 
-// Find the SHA256 hash of the provided request body as a io.ReadSeeker
-func makeSha256Reader(reader io.ReadSeeker) []byte {
-	hash := sha256.New()
-	start, _ := reader.Seek(0, 1)
-	defer reader.Seek(start, 0)
+func signRequest(signer crypto.Signer, signingRegion string, signingAlgorithm string, certificate *x509.Certificate, certificateChain []*x509.Certificate, req *http.Request, payloadHash string) {
+	signerParams := SignerParams{time.Now(), signingRegion, ROLESANYWHERE_SIGNING_NAME, signingAlgorithm}
 
-	io.Copy(hash, reader)
-	return hash.Sum(nil)
-}
-
-// Calculate the hash of the request body
-func calculateContentHash(r *http.Request, body io.ReadSeeker) string {
-	hash := r.Header.Get(x_amz_content_sha256)
-
-	if hash == "" {
-		if body == nil {
-			hash = emptyStringSHA256
-		} else {
-			hash = hex.EncodeToString(makeSha256Reader(body))
-		}
+	// Set headers that are necessary for signing
+	req.Header.Set(host, req.URL.Host)
+	req.Header.Set(x_amz_date, signerParams.GetFormattedSigningDateTime())
+	req.Header.Set(x_amz_x509, certificateToString(certificate))
+	if certificateChain != nil {
+		req.Header.Set(x_amz_x509_chain, certificateChainToString(certificateChain))
 	}
 
-	return hash
+	canonicalRequest, signedHeadersString := createCanonicalRequest(req, payloadHash)
+
+	stringToSign := CreateStringToSign(canonicalRequest, signerParams)
+	signatureBytes, err := signer.Sign(rand.Reader, []byte(stringToSign), crypto.SHA256)
+	if err != nil {
+		log.Println("could not sign request", err)
+		os.Exit(1)
+	}
+	signature := hex.EncodeToString(signatureBytes)
+
+	req.Header.Set(authorization, BuildAuthorizationHeader(req, signedHeadersString, signature, certificate, signerParams))
 }
 
 // Create the canonical query string.
-func createCanonicalQueryString(r *http.Request, body io.ReadSeeker) string {
+func createCanonicalQueryString(r *http.Request) string {
 	rawQuery := strings.Replace(r.URL.Query().Encode(), "+", "%20", -1)
 	return rawQuery
 }
@@ -353,14 +487,14 @@ func stripExcessSpaces(vals []string) {
 }
 
 // Create the canonical request.
-func createCanonicalRequest(r *http.Request, body io.ReadSeeker, contentSha256 string) (string, string) {
+func createCanonicalRequest(r *http.Request, contentSha256 string) (string, string) {
 	var canonicalRequestStrBuilder strings.Builder
 	canonicalHeaderString, signedHeadersString := createCanonicalHeaderString(r)
 	canonicalRequestStrBuilder.WriteString("POST")
 	canonicalRequestStrBuilder.WriteString("\n")
 	canonicalRequestStrBuilder.WriteString("/sessions")
 	canonicalRequestStrBuilder.WriteString("\n")
-	canonicalRequestStrBuilder.WriteString(createCanonicalQueryString(r, body))
+	canonicalRequestStrBuilder.WriteString(createCanonicalQueryString(r))
 	canonicalRequestStrBuilder.WriteString("\n")
 	canonicalRequestStrBuilder.WriteString(canonicalHeaderString)
 	canonicalRequestStrBuilder.WriteString("\n\n")
@@ -387,7 +521,7 @@ func CreateStringToSign(canonicalRequest string, signerParams SignerParams) stri
 }
 
 // Builds the complete authorization header
-func BuildAuthorizationHeader(request *http.Request, body io.ReadSeeker, signedHeadersString string, signature string, certificate *x509.Certificate, signerParams SignerParams) string {
+func BuildAuthorizationHeader(request *http.Request, signedHeadersString string, signature string, certificate *x509.Certificate, signerParams SignerParams) string {
 	signingCredentials := certificate.SerialNumber.String() + "/" + signerParams.GetScope()
 	credential := "Credential=" + signingCredentials
 	signerHeaders := "SignedHeaders=" + signedHeadersString
@@ -416,7 +550,6 @@ func encodeDer(der []byte) (string, error) {
 func parseDERFromPEM(pemDataId string, blockType string) (*pem.Block, error) {
 	bytes, err := os.ReadFile(pemDataId)
 	if err != nil {
-		log.Println(err)
 		return nil, err
 	}
 
@@ -437,7 +570,6 @@ func parseDERFromPEM(pemDataId string, blockType string) (*pem.Block, error) {
 func ReadCertificateBundleData(certificateBundleId string) ([]*x509.Certificate, error) {
 	bytes, err := os.ReadFile(certificateBundleId)
 	if err != nil {
-		log.Println(err)
 		return nil, err
 	}
 
@@ -458,66 +590,43 @@ func ReadCertificateBundleData(certificateBundleId string) ([]*x509.Certificate,
 	return x509.ParseCertificates(derBytes)
 }
 
-func readECPrivateKey(privateKeyId string) (ecdsa.PrivateKey, error) {
+func readECPrivateKey(privateKeyId string) (*ecdsa.PrivateKey, error) {
 	block, err := parseDERFromPEM(privateKeyId, "EC PRIVATE KEY")
-	if err != nil {
-		return ecdsa.PrivateKey{}, errors.New("could not parse PEM data")
-	}
-
-	privateKey, err := x509.ParseECPrivateKey(block.Bytes)
-	if err != nil {
-		return ecdsa.PrivateKey{}, errors.New("could not parse private key")
-	}
-
-	return *privateKey, nil
-}
-
-func readRSAPrivateKey(privateKeyId string) (rsa.PrivateKey, error) {
-	block, err := parseDERFromPEM(privateKeyId, "RSA PRIVATE KEY")
-	if err != nil {
-		return rsa.PrivateKey{}, errors.New("could not parse PEM data")
-	}
-
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		return rsa.PrivateKey{}, errors.New("could not parse private key")
-	}
-
-	return *privateKey, nil
-}
-
-func readPKCS8PrivateKey(privateKeyId string) (crypto.PrivateKey, error) {
-	block, err := parseDERFromPEM(privateKeyId, "PRIVATE KEY")
 	if err != nil {
 		return nil, errors.New("could not parse PEM data")
 	}
 
-	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	privateKey, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		return nil, errors.New("could not parse private key")
 	}
 
-	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
-	if ok {
-		return *rsaPrivateKey, nil
+	return privateKey, nil
+}
+
+func readRSAPrivateKey(privateKeyId string) (*rsa.PrivateKey, error) {
+	block, err := parseDERFromPEM(privateKeyId, "RSA PRIVATE KEY")
+	if err != nil {
+		return nil, errors.New("could not parse PEM data")
 	}
 
-	ecPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
-	if ok {
-		return *ecPrivateKey, nil
+	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, errors.New("could not parse private key")
 	}
 
-	return nil, errors.New("could not parse PKCS#8 private key")
+	return privateKey, nil
 }
 
 // Reads and parses a PKCS#12 file (which should contain an end-entity
-// certificate, (optional) certificate chain, and the key associated with the
-// end-entity certificate). The end-entity certificate will be the first
-// certificate in the returned chain. This method assumes that there is
-// exactly one certificate that doesn't issue any others within the container
-// and treats that as the end-entity certificate. Also, the order of the other
-// certificates in the chain aren't guaranteed (it's also not guaranteed that
-// those certificates form a chain with the end-entity certificat either).
+// certificate (optional), certificate chain (optional), and the key
+// associated with the end-entity certificate). The end-entity certificate
+// will be the first certificate in the returned chain. This method assumes
+// that there is exactly one certificate that doesn't issue any others within
+// the container and treats that as the end-entity certificate. Also, the
+// order of the other certificates in the chain aren't guaranteed. It's
+// also not guaranteed that those certificates form a chain with the
+// end-entity certificate either.
 func ReadPKCS12Data(certificateId string) (certChain []*x509.Certificate, privateKey crypto.PrivateKey, err error) {
 	var (
 		bytes               []byte
@@ -529,7 +638,7 @@ func ReadPKCS12Data(certificateId string) (certChain []*x509.Certificate, privat
 
 	bytes, err = os.ReadFile(certificateId)
 	if err != nil {
-		return nil, nil, nil
+		return nil, nil, err
 	}
 
 	pemBlocks, err = pkcs12.ToPEM(bytes, "")
@@ -557,7 +666,7 @@ func ReadPKCS12Data(certificateId string) (certChain []*x509.Certificate, privat
 
 	certMap = make(map[string]*x509.Certificate)
 	for _, cert := range parsedCerts {
-		// pkix.Name.String() roughly following the RFC 2253 Distinguished Names
+		// pkix.Name.String() roughly follows the RFC 2253 Distinguished Names
 		// syntax, so we assume that it's canonical.
 		issuer := cert.Issuer.String()
 		certMap[issuer] = cert
@@ -572,8 +681,8 @@ func ReadPKCS12Data(certificateId string) (certChain []*x509.Certificate, privat
 			break
 		}
 	}
-	if endEntityFoundIndex == -1 {
-		return nil, "", errors.New("no end-entity certificate found in PKCS#12 file")
+	if Debug {
+		log.Println("no end-entity certificate found in PKCS#12 file")
 	}
 
 	for i, cert := range parsedCerts {
@@ -583,23 +692,6 @@ func ReadPKCS12Data(certificateId string) (certChain []*x509.Certificate, privat
 	}
 
 	return certChain, privateKey, nil
-}
-
-// Load the private key referenced by `privateKeyId`.
-func ReadPrivateKeyData(privateKeyId string) (crypto.PrivateKey, error) {
-	if key, err := readPKCS8PrivateKey(privateKeyId); err == nil {
-		return key, nil
-	}
-
-	if key, err := readECPrivateKey(privateKeyId); err == nil {
-		return key, nil
-	}
-
-	if key, err := readRSAPrivateKey(privateKeyId); err == nil {
-		return key, nil
-	}
-
-	return nil, errors.New("unable to parse private key")
 }
 
 // Reads private key data from a *pem.Block.
@@ -627,7 +719,6 @@ func ReadCertificateData(certificateId string) (CertificateData, *x509.Certifica
 
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		log.Println("could not parse certificate", err)
 		return CertificateData{}, nil, errors.New("could not parse certificate")
 	}
 
