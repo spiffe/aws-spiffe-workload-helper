@@ -10,8 +10,8 @@ kubectl apply -f "${SCRIPTPATH}/admin.yaml"
 kubectl apply -f "${SCRIPTPATH}/test.yaml"
 kubectl create namespace --dry-run=client -o yaml rook-ceph | kubectl apply -f -
 kubectl apply -f "${SCRIPTPATH}/rook-config-override-configmap.yaml"
-helm upgrade --install -n rook-ceph rook-ceph rook-ceph --repo https://charts.rook.io/release --create-namespace -f ceph-values.yaml --wait
-helm upgrade --install -n rook-ceph rook-ceph-cluster rook-ceph-cluster --repo https://charts.rook.io/release -f ceph-cluster-values.yaml --wait
+helm upgrade --install -n rook-ceph rook-ceph rook-ceph --repo https://charts.rook.io/release --create-namespace -f "${SCRIPTPATH}/ceph-values.yaml" --wait
+helm upgrade --install -n rook-ceph rook-ceph-cluster rook-ceph-cluster --repo https://charts.rook.io/release -f "${SCRIPTPATH}/ceph-cluster-values.yaml" --wait
 
 kubectl wait --for=create deploy/rook-ceph-tools -n rook-ceph --timeout=60s
 kubectl wait --for=jsonpath='{.status.readyReplicas}'=1 deploy/rook-ceph-tools -n rook-ceph --timeout=300s
