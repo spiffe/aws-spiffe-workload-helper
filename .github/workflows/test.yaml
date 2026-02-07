@@ -61,6 +61,7 @@ jobs:
         test:
           - minio-policy
           - minio-rolearn
+          - radosgw
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: admin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: admin
+    spec:
+      containers:
+      - command:
+        - /bin/bash
+        args:
+        - -c
+        - |
+          mkdir -p ~/.aws
+          cat > ~/.aws/credentials <<EOF
+          [default]
+          aws_access_key_id = oidc-admin
+          aws_secret_access_key = test1234
+          region = ceph-objectstore
+          EOF
+          cat > ~/setup.sh <<"EOF"
+          #!/bin/bash
+          FINGERPRINT=$(openssl s_client -servername spire-spiffe-oidc-discovery-provider.spire-server -connect spire-spiffe-oidc-discovery-provider.spire-server:443 -showcerts </dev/null 2>/dev/null | openssl x509 -fingerprint -sha1 -noout -in /dev/stdin | awk -F= '{print $2}' | tr -d :)
+
+          aws --region ceph-objectstore iam create-open-id-connect-provider --url 'https://spire-spiffe-oidc-discovery-provider.spire-server' --thumbprint-list $FINGERPRINT --client-id-list radosgw
+
+          echo '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":["arn:aws:iam:::oidc-provider/spire-spiffe-oidc-discovery-provider.spire-server"]},"Action":["sts:AssumeRoleWithWebIdentity"],"Condition":{"StringEquals":{"spire-spiffe-oidc-discovery-provider.spire-server:groups":"data-test-rw"}}}]}' > spire-policy.json
+
+          aws iam create-role --role-name spire --assume-role-policy-document file://spire-policy.json
+
+          echo '{"Version": "2012-10-17", "Statement": [{ "Effect": "Allow", "Action": ["s3:Get*", "s3:Put*", "s3:List*"], "Resource": "arn:aws:s3:::data/test/*"}]}' > data-bucket.json
+
+          aws iam put-role-policy \
+              --role-name spire \
+              --policy-name bucket-data-policy \
+              --policy-document file://data-bucket.json
+          
+          aws --region ceph-objectstore s3 mb s3://data
+          aws --region ceph-objectstore s3 ls s3://data
+          EOF
+          chmod +x ~/setup.sh
+          yum install -y tar openssl
+          while true; do sleep 1000; done
+        name: main
+        image: amazon/aws-cli:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: AWS_ENDPOINT_URL
+          value: "http://rook-ceph-rgw-ceph-objectstore.rook-ceph"

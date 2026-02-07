@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: test
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: test
+    spec:
+      containers:
+      - command:
+        - /bin/bash
+        args:
+        - -c
+        - |
+          curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /bin/mc
+          chmod +x /bin/mc
+          mkdir -p ~/.aws
+          cat > ~/.aws/config <<EOF
+          [default]
+          credential_process = /tmp/aws-spiffe-workload-helper jwt-credential-process --role-arn "arn:aws:iam:::role/spire" --audience radosgw --endpoint 'http://rook-ceph-rgw-ceph-objectstore.rook-ceph' --workload-api-addr unix:/spiffe-workload-api/spire-agent.sock --role-session-name "test"
+          EOF
+          yum install -y tar openssl
+          while true; do sleep 1000; done
+        name: main
+        image: amazon/aws-cli:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: AWS_ENDPOINT_URL
+          value: "http://rook-ceph-rgw-ceph-objectstore.rook-ceph"
+          #value: "https://rook-ceph-rgw-ceph-objectstore.rook-ceph"
+        volumeMounts:
+        - mountPath: /spiffe-workload-api
+          name: spiffe-workload-api
+          readOnly: true
+      volumes:
+      - csi:
+          driver: csi.spiffe.io
+          readOnly: true
+        name: spiffe-workload-api
