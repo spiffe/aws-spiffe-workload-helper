@@ -4,6 +4,8 @@ SCRIPT="$(readlink -f "$0")"
 SCRIPTPATH="$(dirname "${SCRIPT}")"
 BASEPATH="${SCRIPTPATH}/../../../"
 
+kubectl version
+
 helm upgrade --install -n spire-server spire-crds spire-crds --repo https://spiffe.github.io/helm-charts-hardened/ --create-namespace
 helm upgrade --install -n spire-server spire spire --repo https://spiffe.github.io/helm-charts-hardened/ -f "${SCRIPTPATH}/spire-values.yaml" --wait
 kubectl apply -f "${SCRIPTPATH}/admin.yaml"
