@@ -49,6 +49,8 @@ kubectl exec -i -n rook-ceph deploy/rook-ceph-tools -- bash -c '#ceph config set
 
 kubectl rollout restart deploy/rook-ceph-rgw-ceph-objectstore-a -n rook-ceph
 
+sleep 3
+
 kubectl wait --for=jsonpath='{.status.readyReplicas}'=1 deploy/rook-ceph-rgw-ceph-objectstore-a -n rook-ceph --timeout=300s
 
 kubectl exec -i admin-0 -- bash -c "~/setup.sh"
