@@ -33,6 +33,11 @@ cephClusterSpec:
       requests:
         cpu: 100m
         memory: 512Mi
+  storage:
+    useAllNodes: true
+    useAllDevices: false
+    config:
+      deviceFilter: "^loop"
 cephBlockPools: []
 cephObjectStores:
   - name: ceph-objectstore
