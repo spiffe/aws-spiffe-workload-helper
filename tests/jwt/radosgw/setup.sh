@@ -1,8 +1,19 @@
-#!/bin/bash
+#!/bin/bash -e
 
 SCRIPT="$(readlink -f "$0")"
 SCRIPTPATH="$(dirname "${SCRIPT}")"
 BASEPATH="${SCRIPTPATH}/../../../"
+
+GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY:-/tmp/summary}"
+
+teardown() {
+cat <<EOF >>"$GITHUB_STEP_SUMMARY"
+#### PODS
+$(kubectl get pods -A)
+EOF
+}
+
+trap 'EC=$? && trap - SIGTERM && teardown $EC' SIGINT SIGTERM EXIT
 
 kubectl version
 
