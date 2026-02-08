@@ -5,5 +5,3 @@ nodes:
     extraMounts:
     - hostPath: /dev
       containerPath: /dev
-    - hostPath: /lib/modules
-      containerPath: /lib/modules
