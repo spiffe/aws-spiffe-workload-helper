@@ -35,7 +35,7 @@ cephClusterSpec:
         memory: 512Mi
   storage:
     useAllNodes: true
-    useAllDevices: true
+    useAllDevices: false
     config:
       deviceFilter: "^(md|vd).*"
     devices:
