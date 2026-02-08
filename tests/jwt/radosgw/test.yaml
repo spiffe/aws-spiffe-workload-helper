@@ -34,6 +34,12 @@ spec:
         - name: AWS_ENDPOINT_URL
           value: "http://rook-ceph-rgw-ceph-objectstore.rook-ceph"
           #value: "https://rook-ceph-rgw-ceph-objectstore.rook-ceph"
+        - name: AWS_CONFIG_FILE
+          value: ~/.aws/config
+        - name: AWS_PROFILE
+          value: default
+        - name: AWS_EC2_METADATA_DISABLED
+          value: "true"
         volumeMounts:
         - mountPath: /spiffe-workload-api
           name: spiffe-workload-api
