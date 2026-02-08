@@ -35,7 +35,7 @@ cephClusterSpec:
         memory: 512Mi
   storage:
     useAllNodes: true
-    useAllDevices: false
+    useAllDevices: true
     config:
       deviceFilter: "^(loop|vd).*"
 cephBlockPools: []
