@@ -38,6 +38,9 @@ cephClusterSpec:
     useAllDevices: true
     config:
       deviceFilter: "^(loop|vd).*"
+    devices:
+      - name: /dev/loop0
+      - name: /dev/vdb
 cephBlockPools: []
 cephObjectStores:
   - name: ceph-objectstore
