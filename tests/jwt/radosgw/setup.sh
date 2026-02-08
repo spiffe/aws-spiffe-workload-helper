@@ -10,6 +10,9 @@ teardown() {
 cat <<EOF >>"$GITHUB_STEP_SUMMARY"
 #### PODS
 $(kubectl get pods -A)
+
+#### Prep
+$(kubectl logs -f -n rook-ceph -l app=rook-ceph-osd-prepare)
 EOF
 }
 

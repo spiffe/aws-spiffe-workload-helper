@@ -37,7 +37,7 @@ cephClusterSpec:
     useAllNodes: true
     useAllDevices: false
     config:
-      deviceFilter: "^loop"
+      deviceFilter: "^(loop|vd).*"
 cephBlockPools: []
 cephObjectStores:
   - name: ceph-objectstore
