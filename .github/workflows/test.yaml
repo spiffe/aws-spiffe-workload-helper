@@ -83,9 +83,9 @@ jobs:
           config: .github/kind/conf/kind-config.yaml
           verbosity: 1
       - name: Setup disk
-        run: truncate -s 10G /mnt/ceph-disk1.img
+        run: truncate -s 10G /tmp/ceph-disk1.img
       - name: Start disk
-        run: sudo losetup -fP /mnt/ceph-disk1.img
+        run: sudo losetup -fP /tmp/ceph-disk1.img
       - name: Setup services
         run: ./tests/jwt/${{ matrix.test }}/setup.sh
       - name: Run tests
