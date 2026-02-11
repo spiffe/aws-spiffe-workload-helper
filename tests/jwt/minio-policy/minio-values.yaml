@@ -1,3 +1,17 @@
+global:
+  security:
+    allowInsecureImages: true
+image:
+  repository: bitnamilegacy/minio
+clientImage:
+  repository: bitnamilegacy/minio-client
+console:
+  image:
+    repository: bitnamilegacy/minio-object-browser
+defaultInitContainers:
+  volumePermissions:
+    image:
+      repository: bitnamilegacy/os-shell
 provisioning:
   enabled: true
   buckets:

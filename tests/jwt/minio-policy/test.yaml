@@ -25,6 +25,11 @@ spec:
           EOF
           yum install -y tar
           while true; do sleep 1000; done
+        env:
+        - name: AWS_CONFIG_FILE
+          value: ~/.aws/config
+        - name: AWS_EC2_METADATA_DISABLED
+          value: "true"
         name: main
         image: amazon/aws-cli:latest
         imagePullPolicy: IfNotPresent

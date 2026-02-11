@@ -7,8 +7,8 @@ on:
 
 env:
   HELM_VERSION: v3.16.2
-  KIND_VERSION: v0.24.0
-  K8S_VERSION: v1.33.1
+  KIND_VERSION: v0.31.0
+  K8S_VERSION: v1.35.0
 
 jobs:
   lint:
@@ -61,6 +61,7 @@ jobs:
         test:
           - minio-policy
           - minio-rolearn
+          - radosgw
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,11 +76,16 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
       - name: Create kind ${{ env.K8S_VERSION }} cluster
-        uses: helm/kind-action@v1.9.0
+        uses: helm/kind-action@v1.13.0
         with:
           version: ${{ env.KIND_VERSION }}
           node_image: kindest/node:${{ env.K8S_VERSION }}
+          config: .github/kind/conf/kind-config.yaml
           verbosity: 1
+      - name: Setup disk
+        run: truncate -s 10G /tmp/ceph-disk1.img
+      - name: losetup
+        run: sudo losetup -fP /tmp/ceph-disk1.img
       - name: Setup services
         run: ./tests/jwt/${{ matrix.test }}/setup.sh
       - name: Run tests

@@ -110,6 +110,7 @@ type sharedJWTFlags struct {
 	audience        string
 	endpoint        string
 	sessionDuration int
+	roleSessionName string
 	workloadAPIAddr string
 	hint            string
 }
@@ -124,6 +125,7 @@ func (f *sharedJWTFlags) addFlags(cmd *cobra.Command) error {
 		return fmt.Errorf("marking endpoint flag as required: %w", err)
 	}
 	cmd.Flags().IntVar(&f.sessionDuration, "session-duration", 3600, "The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).")
+	cmd.Flags().StringVar(&f.roleSessionName, "role-session-name", "", "The identifier for the role session. Optional.")
 	cmd.Flags().StringVar(&f.workloadAPIAddr, "workload-api-addr", "", "Overrides the address of the Workload API endpoint that will be use to fetch the X509 SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used.")
 	cmd.Flags().StringVar(&f.roleARN, "role-arn", "", "The ARN of the role to assume.")
 	cmd.Flags().StringVar(&f.hint, "hint", "", "Hint to use to find the SVID.")
@@ -195,6 +197,9 @@ func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (v
 	queryParams.Add("DurationSeconds", fmt.Sprintf("%d", sf.sessionDuration))
 	if sf.roleARN != "" {
 		queryParams.Add("RoleArn", sf.roleARN)
+	}
+	if sf.roleSessionName != "" {
+		queryParams.Add("RoleSessionName", sf.roleSessionName)
 	}
 	u.RawQuery = queryParams.Encode()
 	req, err := http.NewRequest("POST", u.String(), nil)

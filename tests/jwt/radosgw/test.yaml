@@ -23,18 +23,23 @@ spec:
           mkdir -p ~/.aws
           cat > ~/.aws/config <<EOF
           [default]
-          credential_process = /tmp/aws-spiffe-workload-helper jwt-credential-process --role-arn arn:minio:iam:::role/MHR2BeH2-q1dHO2yx5U9Mf-tP9Q --audience minio --endpoint http://minio.minio:9000 --workload-api-addr unix:/spiffe-workload-api/spire-agent.sock
+          credential_process = /tmp/aws-spiffe-workload-helper jwt-credential-process --role-arn "arn:aws:iam:::role/spire" --audience radosgw --endpoint 'http://rook-ceph-rgw-ceph-objectstore.rook-ceph' --workload-api-addr unix:/spiffe-workload-api/spire-agent.sock --role-session-name "test"
           EOF
-          yum install -y tar
+          yum install -y tar openssl
           while true; do sleep 1000; done
-        env:
-        - name: AWS_CONFIG_FILE
-          value: ~/.aws/config
-        - name: AWS_EC2_METADATA_DISABLED
-          value: "true"
         name: main
         image: amazon/aws-cli:latest
         imagePullPolicy: IfNotPresent
+        env:
+        - name: AWS_ENDPOINT_URL
+          value: "http://rook-ceph-rgw-ceph-objectstore.rook-ceph"
+          #value: "https://rook-ceph-rgw-ceph-objectstore.rook-ceph"
+        - name: AWS_CONFIG_FILE
+          value: ~/.aws/config
+        - name: AWS_PROFILE
+          value: default
+        - name: AWS_EC2_METADATA_DISABLED
+          value: "true"
         volumeMounts:
         - mountPath: /spiffe-workload-api
           name: spiffe-workload-api

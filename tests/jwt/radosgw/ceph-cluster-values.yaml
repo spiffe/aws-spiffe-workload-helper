@@ -1,0 +1,71 @@
+cephFileSystems: []
+toolbox:
+  enabled: true
+cephClusterSpec:
+  cephVersion: 
+    #image: docker.io/kfox1111/misc2:ceph
+    #image: quay.ceph.io/ceph-ci/ceph:main-13aug-d16a12b-2-centos-stream9-x86_64-devel
+    image: quay.io/ceph/ceph:v20.2.0-20251104
+    #allowUnsupported: true
+  mon:
+    count: 1
+    allowMultiplePerNode: true
+  mgr:
+    count: 1
+    allowMultiplePerNode: true
+  dashboard:
+    enabled: false
+  monitoring:
+    enabled: false
+  resources:
+    cleanup:
+      requests:
+        cpu: 100m
+    mgr:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+    mon:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+    osd:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+  storage:
+    useAllNodes: true
+    useAllDevices: false
+    config:
+      deviceFilter: "^(loop|vd).*"
+    devices:
+      - name: /dev/loop0
+      - name: /dev/vdb
+cephBlockPools: []
+cephObjectStores:
+  - name: ceph-objectstore
+    storageClass:
+      enabled: false
+    spec:
+      metadataPool:
+        failureDomain: host
+        replicated:
+          size: 1
+      dataPool:
+        failureDomain: host
+        replicated:
+          size: 1
+        parameters:
+          bulk: "true"
+      gateway:
+        port: 80
+        resources:
+          limits:
+            memory: "2Gi"
+          requests:
+            cpu: "1000m"
+            memory: "512Mi"
+        # securePort: 443
+        # sslCertificateRef:
+        instances: 1
+        priorityClassName: system-cluster-critical
