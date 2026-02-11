@@ -84,10 +84,8 @@ jobs:
           verbosity: 1
       - name: Setup disk
         run: truncate -s 10G /tmp/ceph-disk1.img
-      - name: Start disk
-        run: sudo apt-get update && sudo apt-get install qemu-utils
-      - name: Make it a disk
-        run: sudo qemu-nbd -f raw --fork -c /dev/nbd0 /tmp/ceph-disk1.img
+      - name: losetup
+        run: sudo losetup -fP /tmp/ceph-disk1.img
       - name: Setup services
         run: ./tests/jwt/${{ matrix.test }}/setup.sh
       - name: Run tests
