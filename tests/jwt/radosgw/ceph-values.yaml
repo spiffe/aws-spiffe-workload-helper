@@ -1,4 +1,4 @@
 csi:
   enableRbdDriver: false
   enableCephfsDriver: false
-  allowLoopDevices: true
+allowLoopDevices: true
