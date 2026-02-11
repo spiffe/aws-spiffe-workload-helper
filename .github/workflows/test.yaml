@@ -85,11 +85,9 @@ jobs:
       - name: Setup disk
         run: truncate -s 10G /tmp/ceph-disk1.img
       - name: Start disk
-        run: sudo losetup -fP /tmp/ceph-disk1.img
-      - name: Make it an mdarray
-        run: sudo mdadm --create /dev/md0 --level=1 -f --run --raid-devices=2 /dev/loop0 missing
-      - name: Hide the loopback
-        run: sudo mv /dev/loop0 /tmp
+        run: sudo apt-get update && sudo apt-get install qemu-utils
+      - name: Make it a disk
+        run: sudo qemu-nbd -c /dev/nbd0 /tmp/ceph-disk1.img
       - name: Setup services
         run: ./tests/jwt/${{ matrix.test }}/setup.sh
       - name: Run tests
