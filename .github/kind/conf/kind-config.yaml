@@ -5,5 +5,5 @@ nodes:
     extraMounts:
     - hostPath: /dev
       containerPath: /dev
-    - hostPath: /run/udev/control
-      containerPath: /run/udev/control
+    - hostPath: /run/udev
+      containerPath: /run/udev
