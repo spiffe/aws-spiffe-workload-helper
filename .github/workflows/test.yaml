@@ -87,7 +87,7 @@ jobs:
       - name: Start disk
         run: sudo apt-get update && sudo apt-get install qemu-utils
       - name: Make it a disk
-        run: sudo qemu-nbd -c /dev/nbd0 /tmp/ceph-disk1.img
+        run: sudo qemu-nbd --fork -c /dev/nbd0 /tmp/ceph-disk1.img
       - name: Setup services
         run: ./tests/jwt/${{ matrix.test }}/setup.sh
       - name: Run tests
