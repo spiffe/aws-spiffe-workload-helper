@@ -11,8 +11,10 @@ the [`rolesanywhere-credential-helper`](https://github.com/aws/rolesanywhere-cre
 released by AWS, and is intended to be used in place of
 `rolesanywhere-credential-helper`.
 
-Currently, the helper only supports authenticating to AWS using an X.509 SVID
-via [AWS Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html).
+The helper supports authenticating to AWS using an X.509 SVID via
+[AWS Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html),
+or using a JWT SVID via
+[AWS AssumeRoleWithWebIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html).
 
 ## Usage
 
@@ -124,6 +126,39 @@ $ aws-spiffe-workload-helper x509-credential-file \
 | aws-credentials-path | Yes      | The path to the AWS credentials file to write.                                                                                                                                           | `/opt/my-aws-credentials-file`                                                                  |
 | force                | No       | If set, failures loading the existing AWS credentials file will be ignored and the contents overwritten.                                                                                 |                                                                                                 |
 | replace              | No       | If set, the AWS credentials file will be replaced if it exists. This will remove any profiles not written by this tool.                                                                  |                                                                                                 |
+
+#### `jwt-credential-process`
+
+The `jwt-credential-process` command exchanges a JWT SVID for a short-lived
+set of AWS credentials using the AWS `AssumeRoleWithWebIdentity` API. It
+returns the credentials to STDOUT, in the format expected by AWS SDKs and CLIs
+when invoking an external credential process.
+
+The command fetches the JWT SVID from the SPIFFE Workload API. The location of
+the SPIFFE Workload API endpoint should be specified using the
+`SPIFFE_ENDPOINT_SOCKET` environment variable or the `--workload-api-addr` flag.
+
+Example usage:
+
+```sh
+$ aws-spiffe-workload-helper jwt-credential-process \
+    --audience sts.amazonaws.com \
+    --endpoint https://sts.amazonaws.com \
+    --role-arn arn:aws:iam::123456789012:role/example-role \
+    --workload-api-addr unix:///opt/workload-api.sock
+```
+
+##### Reference
+
+| Flag              | Required | Description                                                                                                                                                                              | Example                                                       |
+|-------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| audience          | Yes      | The audience to request in the JWT SVID. Should match the audience expected by the IAM endpoint.                                                                                         | `sts.amazonaws.com`                                           |
+| endpoint          | Yes      | The URL of the IAM endpoint to call with `AssumeRoleWithWebIdentity`.                                                                                                                    | `https://sts.amazonaws.com`                                   |
+| role-arn          | No       | The ARN of the role to assume. Optional if the endpoint encodes the role.                                                                                                                | `arn:aws:iam::123456789012:role/example-role`                 |
+| session-duration  | No       | The duration, in seconds, of the resulting session. Optional. Can range from 15 minutes (900) to 12 hours (43200).                                                                       | `3600`                                                        |
+| role-session-name | No       | The identifier for the role session. Optional.                                                                                                                                           | `my-session`                                                  |
+| hint              | No       | Selects a specific JWT SVID by its hint when multiple SVIDs are available. Optional.                                                                                                     | `my-hint`                                                     |
+| workload-api-addr | No       | Overrides the address of the Workload API endpoint that will be used to fetch the JWT SVID. If unspecified, the value from the SPIFFE_ENDPOINT_SOCKET environment variable will be used. | `unix:///opt/my/path/workload.sock`                           |
 
 ## Configuring AWS SDKs and CLIs
 
