@@ -1,10 +1,9 @@
-package main
+package cli
 
 import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spiffe/aws-spiffe-workload-helper/internal"
@@ -51,7 +50,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("marshalling credentials: %w", err)
 			}
-			_, err = os.Stdout.Write(out)
+			_, err = cmd.OutOrStdout().Write(out)
 			if err != nil {
 				return fmt.Errorf("writing credentials to stdout: %w", err)
 			}

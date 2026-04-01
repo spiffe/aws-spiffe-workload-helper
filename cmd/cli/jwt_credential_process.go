@@ -1,10 +1,9 @@
-package main
+package cli
 
 import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -73,7 +72,7 @@ func newJWTCredentialProcessCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("marshalling credentials: %w", err)
 			}
-			_, err = os.Stdout.Write(out)
+			_, err = cmd.OutOrStdout().Write(out)
 			if err != nil {
 				return fmt.Errorf("writing credentials to stdout: %w", err)
 			}
