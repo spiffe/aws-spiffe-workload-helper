@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	awsspiffe "github.com/spiffe/aws-spiffe-workload-helper"
-	"github.com/spiffe/aws-spiffe-workload-helper/vendoredaws"
+	"github.com/spiffe/aws-spiffe-workload-helper/internal/rolesanywhere"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 )
@@ -117,27 +118,40 @@ func (f *sharedJWTFlags) addFlags(cmd *cobra.Command) error {
 }
 
 func exchangeX509SVIDForAWSCredentials(
+	ctx context.Context,
 	sf *sharedX509Flags,
 	svid *x509svid.SVID,
-) (vendoredaws.CredentialProcessOutput, error) {
+) (rolesanywhere.CredentialProcessOutput, error) {
 	signer := &awsspiffe.X509SVIDSigner{
 		SVID: svid,
 	}
 	signatureAlgorithm, err := signer.SignatureAlgorithm()
 	if err != nil {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("getting signature algorithm: %w", err)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("getting signature algorithm: %w", err)
 	}
-	credentials, err := vendoredaws.GenerateCredentials(&vendoredaws.CredentialsOpts{
-		RoleArn:           sf.roleARN,
-		ProfileArnStr:     sf.profileARN,
-		Region:            sf.region,
-		RoleSessionName:   sf.roleSessionName,
-		TrustAnchorArnStr: sf.trustAnchorARN,
-		SessionDuration:   sf.sessionDuration,
-		Endpoint:          sf.endpoint,
-	}, signer, signatureAlgorithm)
+	certificate, err := signer.Certificate()
 	if err != nil {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("generating credentials: %w", err)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("getting certificate: %w", err)
+	}
+	certificateChain, err := signer.CertificateChain()
+	if err != nil {
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("getting certificate chain: %w", err)
+	}
+	credentials, err := rolesanywhere.CreateSession(ctx, rolesanywhere.CreateSessionInput{
+		RoleARN:          sf.roleARN,
+		ProfileARN:       sf.profileARN,
+		TrustAnchorARN:   sf.trustAnchorARN,
+		Region:           sf.region,
+		Endpoint:         sf.endpoint,
+		SessionDuration:  sf.sessionDuration,
+		RoleSessionName:  sf.roleSessionName,
+		Certificate:      certificate,
+		CertificateChain: certificateChain,
+		Signer:           signer,
+		SigningAlgorithm: signatureAlgorithm,
+	})
+	if err != nil {
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("generating credentials: %w", err)
 	}
 	slog.Debug(
 		"Generated AWS credentials",
@@ -169,11 +183,11 @@ type Credentials struct {
 	SessionToken    string `xml:"SessionToken"`
 }
 
-func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (vendoredaws.CredentialProcessOutput, error) {
+func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (rolesanywhere.CredentialProcessOutput, error) {
 	token := svid.Marshal()
 	u, err := url.Parse(sf.endpoint)
 	if err != nil {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error parsing URL: %v", err)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("error parsing URL: %v", err)
 	}
 	queryParams := u.Query()
 	queryParams.Add("Action", "AssumeRoleWithWebIdentity")
@@ -189,27 +203,27 @@ func exchangeJWTSVIDForAWSCredentials(sf *sharedJWTFlags, svid *jwtsvid.SVID) (v
 	u.RawQuery = queryParams.Encode()
 	req, err := http.NewRequest("POST", u.String(), nil)
 	if err != nil {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error making new request: %v", err)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("error making new request: %v", err)
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error performing the sts request: %v", err)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("error performing the sts request: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error reading response: %v", err)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("error reading response: %v", err)
 	}
 	if resp.StatusCode != 200 {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error performing the sts request: %d: %s: %s", resp.StatusCode, http.StatusText(resp.StatusCode), body)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("error performing the sts request: %d: %s: %s", resp.StatusCode, http.StatusText(resp.StatusCode), body)
 	}
 	var stsResponse AssumeRoleWithWebIdentityResponse
 	err = xml.Unmarshal(body, &stsResponse)
 	if err != nil {
-		return vendoredaws.CredentialProcessOutput{}, fmt.Errorf("error parsing xml respopse: %v", err)
+		return rolesanywhere.CredentialProcessOutput{}, fmt.Errorf("error parsing xml respopse: %v", err)
 	}
-	cpo := vendoredaws.CredentialProcessOutput{
+	cpo := rolesanywhere.CredentialProcessOutput{
 		Version:         1,
 		AccessKeyId:     stsResponse.AssumeRoleWithWebIdentityResult.Credentials.AccessKeyId,
 		SecretAccessKey: stsResponse.AssumeRoleWithWebIdentityResult.Credentials.SecretAccessKey,

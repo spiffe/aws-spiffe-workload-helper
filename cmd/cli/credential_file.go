@@ -70,7 +70,7 @@ func oneshotX509CredentialFile(
 		"svid", svidValue(svid),
 	)
 
-	credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
+	credentials, err := exchangeX509SVIDForAWSCredentials(ctx, sf, svid)
 	if err != nil {
 		return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
 	}
@@ -179,7 +179,7 @@ func daemonX509CredentialFile(
 			"Exchanging X509 SVID for AWS credentials",
 			"svid", svidValue(svid),
 		)
-		credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
+		credentials, err := exchangeX509SVIDForAWSCredentials(ctx, sf, svid)
 		if err != nil {
 			return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
 		}

@@ -257,7 +257,7 @@ func verifySigV4X509(r *http.Request, body []byte, caCert *x509.Certificate) err
 	}
 
 	// 5. Reconstruct the canonical request.
-	// Format matches vendoredaws/signer.go createCanonicalRequest().
+	// Format matches internal/rolesanywhere/sigv4x509.go createCanonicalRequest().
 	contentHash := sha256Hex(body)
 	canonicalHeaders, signedHeadersStr := buildCanonicalHeaders(r, auth.signedHeaders)
 
@@ -277,7 +277,7 @@ func verifySigV4X509(r *http.Request, body []byte, caCert *x509.Certificate) err
 	canonicalRequestHash := sha256Hex([]byte(cr.String()))
 
 	// 6. Reconstruct the string to sign.
-	// Format matches vendoredaws/signer.go CreateStringToSign().
+	// Format matches internal/rolesanywhere/sigv4x509.go CreateStringToSign().
 	scope := credParts[1] // date/region/service/aws4_request
 	amzDate := r.Header.Get("X-Amz-Date")
 	if amzDate == "" {
@@ -315,7 +315,7 @@ func verifySigV4X509(r *http.Request, body []byte, caCert *x509.Certificate) err
 }
 
 // buildCanonicalHeaders reconstructs the canonical header string from the
-// signed headers list, matching the format in vendoredaws/signer.go.
+// signed headers list, matching the format in internal/rolesanywhere/sigv4x509.go.
 func buildCanonicalHeaders(r *http.Request, signedHeaders []string) (string, string) {
 	sorted := make([]string, len(signedHeaders))
 	copy(sorted, signedHeaders)
@@ -348,7 +348,7 @@ func sha256Hex(data []byte) string {
 }
 
 // stripExcessSpaces removes leading/trailing whitespace and collapses multiple
-// consecutive spaces. Matches vendoredaws/signer.go stripExcessSpaces().
+// consecutive spaces. Matches internal/rolesanywhere/sigv4x509.go stripExcessSpaces().
 func stripExcessSpaces(vals []string) {
 	var j, k, l, m, spaces int
 	for i, str := range vals {

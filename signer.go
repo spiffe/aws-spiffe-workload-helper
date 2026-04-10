@@ -13,9 +13,8 @@ import (
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 )
 
-// SPIFFESigner creates signatures compatible with the AWS RolesAnywhere
-// API using an X509 SVID. It implements the aws_signing_helper.Signer
-// interface.
+// X509SVIDSigner creates signatures compatible with the AWS RolesAnywhere
+// API using an X509 SVID. It implements crypto.Signer.
 type X509SVIDSigner struct {
 	SVID *x509svid.SVID
 }
@@ -27,8 +26,7 @@ func (s *X509SVIDSigner) Public() crypto.PublicKey {
 }
 
 // Sign creates a signature of the given input using the keypair associated with
-// the signer's X509 SVID.
-// Implements the aws_signing_helper.Signer and crypto.Signer interfaces.
+// the signer's X509 SVID. Implements the crypto.Signer interface.
 func (s *X509SVIDSigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
 	// Note(strideynet):
 	// As of the time of writing, it looks like the AWS signing helper will
@@ -101,14 +99,12 @@ func (s *X509SVIDSigner) SignatureAlgorithm() (string, error) {
 
 // Certificate returns the leaf certificate e.g the one identifying the
 // workload.
-// Implements the aws_signing_helper.Signer interface.
 func (s *X509SVIDSigner) Certificate() (*x509.Certificate, error) {
 	return s.SVID.Certificates[0], nil
 }
 
 // CertificateChain returns any certificates needed to chain the leaf to
 // the trust anchor.
-// Implements the aws_signing_helper.Signer interface.
 func (s *X509SVIDSigner) CertificateChain() ([]*x509.Certificate, error) {
 	if len(s.SVID.Certificates) > 1 {
 		return s.SVID.Certificates[1:], nil
@@ -116,9 +112,3 @@ func (s *X509SVIDSigner) CertificateChain() ([]*x509.Certificate, error) {
 	return nil, nil
 }
 
-// Close should be called when the signer is no longer needed. It is a no-op
-// for this implementation.
-// Implements the aws_signing_helper.Signer interface.
-func (s *X509SVIDSigner) Close() {
-	// Nothing to do here...
-}

@@ -41,7 +41,7 @@ func newX509CredentialProcessCmd() (*cobra.Command, error) {
 			svid := x509Ctx.DefaultSVID()
 			slog.Debug("Fetched X509 SVID", "svid", svidValue(svid))
 
-			credentials, err := exchangeX509SVIDForAWSCredentials(sf, svid)
+			credentials, err := exchangeX509SVIDForAWSCredentials(ctx, sf, svid)
 			if err != nil {
 				return fmt.Errorf("exchanging X509 SVID for AWS credentials: %w", err)
 			}
