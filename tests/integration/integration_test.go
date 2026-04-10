@@ -12,7 +12,7 @@ import (
 	"github.com/spiffe/aws-spiffe-workload-helper/cmd/cli"
 	"github.com/spiffe/aws-spiffe-workload-helper/tests/integration/internal/fakeawsapi"
 	"github.com/spiffe/aws-spiffe-workload-helper/tests/integration/internal/fakespiffeapi"
-	"github.com/spiffe/aws-spiffe-workload-helper/vendoredaws"
+	"github.com/spiffe/aws-spiffe-workload-helper/internal/rolesanywhere"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/ini.v1"
@@ -54,7 +54,7 @@ func TestX509CredentialProcess(t *testing.T) {
 	})
 	require.NoError(t, rootCmd.Execute())
 
-	var creds vendoredaws.CredentialProcessOutput
+	var creds rolesanywhere.CredentialProcessOutput
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &creds))
 	assert.Equal(t, 1, creds.Version)
 	assert.Equal(t, fakeawsapi.AccessKeyID, creds.AccessKeyId)
@@ -179,7 +179,7 @@ func TestJWTCredentialProcess(t *testing.T) {
 	})
 	require.NoError(t, rootCmd.Execute())
 
-	var creds vendoredaws.CredentialProcessOutput
+	var creds rolesanywhere.CredentialProcessOutput
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &creds))
 	assert.Equal(t, 1, creds.Version)
 	assert.Equal(t, fakeawsapi.AccessKeyID, creds.AccessKeyId)
