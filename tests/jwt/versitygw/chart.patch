@@ -1,0 +1,384 @@
+diff --git a/chart/README.md b/chart/README.md
+index 828675c..6f763d0 100644
+--- a/chart/README.md
++++ b/chart/README.md
+@@ -97,7 +97,7 @@ gateway:
+
+ | Feature | Key values |
+ |---------|------------|
+-| **TLS** | `tls.enabled=true` — serve HTTPS; supply a TLS Secret via `certificate.secretName` or let cert-manager provision one |
++| **TLS** | `tls.enabled=true` — serve HTTPS; supply a TLS Secret via `certificate.secretName`, let cert-manager provision one, or mount certificates from a volume in `extraVolumes` via `certificate.volumeName` |
+ | **cert-manager** | `certificate.create=true`, `certificate.issuerRef`, `certificate.dnsNames` |
+ | **Ingress** | `ingress.enabled=true`, `ingress.className`, `ingress.hosts`, `ingress.tls` |
+ | **HTTPRoute** | `httpRoute.enabled=true` — Gateway API successor to Ingress for S3 API; also `admin.httpRoute.enabled=true` and `webui.httpRoute.enabled=true` to expose the admin API and/or WebUI |
+@@ -108,6 +108,7 @@ gateway:
+ | **Persistence** | `persistence.enabled=true` — provisions a PVC for backend data and IAM storage (unless `iam.persistence.enabled=true`); defaults to `10Gi`, or uses a hostPath volume specified by `persistence.hostPath` |
+ | **NetworkPolicy** | `networkPolicy.enabled=true` — restricts ingress to selected pods/namespaces; allows all egress |
+ | **Debug logging** | `gateway.logLevel` — `silent` (default), `debug` (request/response logging, secrets masked), or `unsafe` (unmasked, local troubleshooting only) |
++| **Pod extension hooks** | `initContainers`, `extraContainers`, `extraVolumes`, `extraVolumeMounts`, `command`, and `shareProcessNamespace` (and the same under `iamServer`) — add sidecars such as a certificate rotator (e.g. spiffe-helper) that signals the gateway with SIGHUP, or an OIDC discovery provider next to the IAM server |
+ | **Scheduling** | `nodeSelector`, `affinity`, `tolerations`, and `topologySpreadConstraints` — control pod placement and spread replicas across nodes/zones for high availability |
+
+ ## Serving Under One Hostname
+@@ -161,7 +162,7 @@ Key points:
+ - **Independent scaling**: `iamServer` is a separate Deployment (`iamServer.replicaCount`), so it can be centralized and scaled independently of the gateway. Manage users/roles/policies against its public control-plane API (`iamServer.port`, default `7070`) using the AWS CLI/SDK. It reuses the gateway root Secret by default; set `iamServer.auth.existingSecret` to separate the control-plane identity, and point `iam.standalone.credentials.existingSecret` at the corresponding client identity.
+ - **Storage**: `iamServer.storage.type` is `internal` (file-backed, needs `iamServer.persistence`, is limited to one replica, and always uses a `Recreate` rollout) or `vault` (`iamServer.storage.vault.*`, centralized and required if `iamServer.replicaCount > 1`).
+ - **Separate Services**: `iamServer.service.type` applies only to the public control-plane Service. The private listener is exposed by a separate, always-`ClusterIP` Service, so selecting `NodePort` or `LoadBalancer` does not publish the private port. Enable `iamServer.tls` before exposing the public API outside a trusted network.
+-- **Private mTLS endpoint**: gateways reach the standalone IAM service over a private endpoint (`iamServer.private.port`, default `7443`) that always requires mutual TLS on TCP. Provide certificates either via `existingSecret` (bring your own `tls.crt`/`tls.key`/`ca.crt`) or `certificate.create=true` to auto-provision via cert-manager.
++- **Private mTLS endpoint**: gateways reach the standalone IAM service over a private endpoint (`iamServer.private.port`, default `7443`) that always requires mutual TLS on TCP. Provide certificates either via `existingSecret` (bring your own `tls.crt`/`tls.key`/`ca.crt`), `certificate.create=true` to auto-provision via cert-manager, or `certificate.volumeName` to mount a volume from `extraVolumes`/`iamServer.extraVolumes` that another container keeps populated (e.g. SPIFFE X509-SVIDs written by spiffe-helper).
+ - **Shared CA requirement**: when using cert-manager auto-provisioning, `iamServer.private.certificate.issuerRef` and `iam.standalone.certificate.issuerRef` **must reference the same CA-type issuer** (an `Issuer`/`ClusterIssuer` of kind `CA`, or a Vault issuer) — one that populates `ca.crt` in the resulting Secret. Both sides verify their peer using their own certificate's `ca.crt`, which only works when both certificates share the same issuing CA.
+ - **External IAM service**: to point a gateway at a standalone IAM service deployed outside this chart (or by a separate chart release), set `iam.standalone.endpoint` to its `host:port` and provide the mTLS material via `iam.standalone.certificate.existingSecret`.
+ - **OIDC identity providers**: `AssumeRoleWithWebIdentity` only trusts an OIDC provider reachable over verified https at a publicly routable address on the implicit `:443`. An in-cluster provider satisfies none of that, so `iamServer.oidc.allowPrivateEndpoints` permits private/loopback addresses and an explicit port (a SPIRE OIDC discovery provider on a ClusterIP `Service`), and `iamServer.oidc.allowInsecureTransport` additionally permits plaintext `http://` providers and drops TLS verification (the same provider bound to `127.0.0.1` as a sidecar). Each relaxes real protections — see the comments in `values.yaml` — so enable only the one your topology needs. `iamServer.oidc.discoveryUrls` is the narrower alternative for a provider that is public but reachable in-cluster: it moves only one provider's discovery fetch to an address you name (private addresses included, without `allowPrivateEndpoints`), while tokens keep naming their public issuer.
+diff --git a/chart/templates/certificate.yaml b/chart/templates/certificate.yaml
+index b51f3ee..c1505bf 100644
+--- a/chart/templates/certificate.yaml
++++ b/chart/templates/certificate.yaml
+@@ -1,4 +1,4 @@
+-{{- if .Values.certificate.create }}
++{{- if and .Values.certificate.create (not .Values.certificate.volumeName) }}
+ apiVersion: cert-manager.io/v1
+ kind: Certificate
+ metadata:
+diff --git a/chart/templates/deployment.yaml b/chart/templates/deployment.yaml
+index 8a22117..13da15e 100644
+--- a/chart/templates/deployment.yaml
++++ b/chart/templates/deployment.yaml
+@@ -7,6 +7,9 @@
+ {{- $iamStandalone := .Values.iam.standalone | default dict -}}
+ {{- $iamStandaloneEndpoint := $iamStandalone.endpoint | default "" -}}
+ {{- $iamStandaloneCredentials := $iamStandalone.credentials | default dict -}}
++{{- $iamClientCertVolume := dig "certificate" "volumeName" "" $iamStandalone -}}
++{{- $iamClientCerts := or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret $iamClientCertVolume -}}
++{{- $tlsCertVolume := dig "volumeName" "" (.Values.certificate | default dict) -}}
+ {{- $internalIAM := and .Values.iam.enabled (eq .Values.iam.type "internal") -}}
+ {{- $iamDir := clean (.Values.iam.dir | default "/mnt/iam") -}}
+ {{- $iamPersistence := .Values.iam.persistence | default dict -}}
+@@ -85,10 +88,10 @@
+ {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") $iamStandaloneEndpoint (not (regexMatch "^(\\[[0-9A-Fa-f:]+\\]|[^/:[:space:]]+):[0-9]+$" $iamStandaloneEndpoint)) }}
+   {{- fail "iam.standalone.endpoint must be a host:port TCP address; the chart does not provide a shared volume for Unix sockets" }}
+ {{- end }}
+-{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (not (or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret)) }}
+-  {{- fail "a standalone IAM TCP endpoint requires iam.standalone.certificate.create=true or iam.standalone.certificate.existingSecret" }}
++{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (not $iamClientCerts) }}
++  {{- fail "a standalone IAM TCP endpoint requires iam.standalone.certificate.create=true, iam.standalone.certificate.existingSecret or iam.standalone.certificate.volumeName" }}
+ {{- end }}
+-{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") .Values.iam.standalone.certificate.create (not .Values.iam.standalone.certificate.existingSecret) (not .Values.iam.standalone.certificate.issuerRef.name) }}
++{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") .Values.iam.standalone.certificate.create (not .Values.iam.standalone.certificate.existingSecret) (not $iamClientCertVolume) (not .Values.iam.standalone.certificate.issuerRef.name) }}
+   {{- fail "iam.standalone.certificate.issuerRef.name is required when creating the IAM client certificate" }}
+ {{- end }}
+ {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (or (and .Values.iam.standalone.access (not .Values.iam.standalone.secret)) (and .Values.iam.standalone.secret (not .Values.iam.standalone.access))) }}
+@@ -145,10 +148,21 @@ spec:
+       automountServiceAccountToken: false
+       securityContext:
+         {{- toYaml .Values.podSecurityContext | nindent 8 }}
++      {{- if .Values.shareProcessNamespace }}
++      shareProcessNamespace: true
++      {{- end }}
++      {{- with .Values.initContainers }}
++      initContainers:
++        {{- toYaml . | nindent 8 }}
++      {{- end }}
+       containers:
+         - name: {{ .Chart.Name }}
+           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+           imagePullPolicy: {{ .Values.image.pullPolicy }}
++          {{- with .Values.command }}
++          command:
++            {{- toYaml . | nindent 12 }}
++          {{- end }}
+           env:
+             # Backend selection — consumed by docker-entrypoint.sh
+             - name: VGW_BACKEND
+@@ -296,7 +310,7 @@ spec:
+               value: {{ .Values.iam.standalone.secret | quote }}
+             {{- end }}
+             {{- end }}
+-            {{- if or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret }}
++            {{- if $iamClientCerts }}
+             - name: VGW_IAM_STANDALONE_CLIENT_CERT
+               value: /iam-client-certs/tls.crt
+             - name: VGW_IAM_STANDALONE_CLIENT_CERT_KEY
+@@ -358,6 +372,9 @@ spec:
+             httpGet:
+               path: "/_/health"
+               port: s3-api
++              {{- if .Values.tls.enabled }}
++              scheme: HTTPS
++              {{- end }}
+             initialDelaySeconds: 5
+             periodSeconds: 15
+           securityContext:
+@@ -397,16 +414,22 @@ spec:
+               subPath: iam
+               readOnly: false
+             {{- end }}
+-            {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret) }}
+-            - name: iam-client-certs
++            {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") $iamClientCerts }}
++            - name: {{ $iamClientCertVolume | default "iam-client-certs" }}
+               mountPath: /iam-client-certs
+               readOnly: true
+             {{- end }}
+             {{- if .Values.tls.enabled }}
+-            - name: certificates
++            - name: {{ $tlsCertVolume | default "certificates" }}
+               mountPath: /certs
+               readOnly: true
+             {{- end }}
++            {{- with .Values.extraVolumeMounts }}
++            {{- toYaml . | nindent 12 }}
++            {{- end }}
++        {{- with .Values.extraContainers }}
++        {{- toYaml . | nindent 8 }}
++        {{- end }}
+       volumes:
+         - name: data
+           {{- if .Values.persistence.enabled }}
+@@ -426,17 +449,20 @@ spec:
+           persistentVolumeClaim:
+             claimName: {{ include "versitygw.iamPvcName" . }}
+         {{- end }}
+-        {{- if .Values.tls.enabled }}
++        {{- if and .Values.tls.enabled (not $tlsCertVolume) }}
+         - name: certificates
+           secret:
+             secretName: {{ include "versitygw.certificateSecretName" . }}
+         {{- end }}
+-        {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret) }}
++        {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") $iamClientCerts (not $iamClientCertVolume) }}
+         - name: iam-client-certs
+           secret:
+             secretName: {{ include "versitygw.iamClientCertSecretName" . }}
+             defaultMode: 0440
+         {{- end }}
++        {{- with .Values.extraVolumes }}
++        {{- toYaml . | nindent 8 }}
++        {{- end }}
+
+       {{- with .Values.nodeSelector }}
+       nodeSelector:
+diff --git a/chart/templates/iam-certificate.yaml b/chart/templates/iam-certificate.yaml
+index 273de8b..a5ccf35 100644
+--- a/chart/templates/iam-certificate.yaml
++++ b/chart/templates/iam-certificate.yaml
+@@ -1,5 +1,5 @@
+ {{- $iamServer := .Values.iamServer | default dict -}}
+-{{- if and ($iamServer.enabled | default false) .Values.iamServer.private.enabled .Values.iamServer.private.certificate.create (not .Values.iamServer.private.certificate.existingSecret) }}
++{{- if and ($iamServer.enabled | default false) .Values.iamServer.private.enabled .Values.iamServer.private.certificate.create (not .Values.iamServer.private.certificate.existingSecret) (not .Values.iamServer.private.certificate.volumeName) }}
+ apiVersion: cert-manager.io/v1
+ kind: Certificate
+ metadata:
+@@ -24,7 +24,7 @@ spec:
+   usages:
+     - server auth
+ {{- end }}
+-{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") .Values.iam.standalone.certificate.create (not .Values.iam.standalone.certificate.existingSecret) }}
++{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") .Values.iam.standalone.certificate.create (not .Values.iam.standalone.certificate.existingSecret) (not .Values.iam.standalone.certificate.volumeName) }}
+ ---
+ apiVersion: cert-manager.io/v1
+ kind: Certificate
+diff --git a/chart/templates/iam-deployment.yaml b/chart/templates/iam-deployment.yaml
+index 8a43957..8ecfaae 100644
+--- a/chart/templates/iam-deployment.yaml
++++ b/chart/templates/iam-deployment.yaml
+@@ -2,6 +2,8 @@
+ {{- if ($iamServer.enabled | default false) }}
+ {{- $iamServerAuth := .Values.iamServer.auth | default dict -}}
+ {{- $iamServerOidc := .Values.iamServer.oidc | default dict -}}
++{{- $iamPrivateCertVolume := dig "private" "certificate" "volumeName" "" $iamServer -}}
++{{- $iamTLSCertVolume := dig "tls" "volumeName" "" $iamServer -}}
+ {{- if not (or (eq .Values.iamServer.storage.type "internal") (eq .Values.iamServer.storage.type "vault")) }}
+   {{- fail "iamServer.storage.type must be either internal or vault" }}
+ {{- end }}
+@@ -14,17 +16,17 @@
+ {{- if and (eq .Values.iamServer.storage.type "vault") (not .Values.iamServer.storage.vault.endpointUrl) }}
+   {{- fail "iamServer.storage.vault.endpointUrl is required when iamServer.storage.type=vault" }}
+ {{- end }}
+-{{- if and .Values.iamServer.private.enabled (not .Values.iamServer.private.certificate.create) (not .Values.iamServer.private.certificate.existingSecret) }}
+-  {{- fail "iamServer.private.enabled requires either iamServer.private.certificate.create=true or iamServer.private.certificate.existingSecret" }}
++{{- if and .Values.iamServer.private.enabled (not .Values.iamServer.private.certificate.create) (not .Values.iamServer.private.certificate.existingSecret) (not $iamPrivateCertVolume) }}
++  {{- fail "iamServer.private.enabled requires iamServer.private.certificate.create=true, iamServer.private.certificate.existingSecret or iamServer.private.certificate.volumeName" }}
+ {{- end }}
+-{{- if and .Values.iamServer.private.enabled .Values.iamServer.private.certificate.create (not .Values.iamServer.private.certificate.existingSecret) (not .Values.iamServer.private.certificate.issuerRef.name) }}
++{{- if and .Values.iamServer.private.enabled .Values.iamServer.private.certificate.create (not .Values.iamServer.private.certificate.existingSecret) (not $iamPrivateCertVolume) (not .Values.iamServer.private.certificate.issuerRef.name) }}
+   {{- fail "iamServer.private.certificate.issuerRef.name is required when creating the IAM server certificate" }}
+ {{- end }}
+ {{- if and .Values.iamServer.private.enabled (eq (int .Values.iamServer.private.port) (int .Values.iamServer.port)) }}
+   {{- fail "iamServer.private.port must differ from iamServer.port" }}
+ {{- end }}
+-{{- if and .Values.iamServer.tls.enabled (not .Values.iamServer.tls.secretName) }}
+-  {{- fail "iamServer.tls.secretName is required when iamServer.tls.enabled=true" }}
++{{- if and .Values.iamServer.tls.enabled (not .Values.iamServer.tls.secretName) (not $iamTLSCertVolume) }}
++  {{- fail "iamServer.tls.secretName or iamServer.tls.volumeName is required when iamServer.tls.enabled=true" }}
+ {{- end }}
+ {{- if not (or (eq .Values.iamServer.logLevel "silent") (eq .Values.iamServer.logLevel "debug") (eq .Values.iamServer.logLevel "unsafe")) }}
+   {{- fail "iamServer.logLevel must be one of silent, debug, or unsafe" }}
+@@ -78,10 +80,21 @@ spec:
+       automountServiceAccountToken: false
+       securityContext:
+         {{- toYaml .Values.podSecurityContext | nindent 8 }}
++      {{- if .Values.iamServer.shareProcessNamespace }}
++      shareProcessNamespace: true
++      {{- end }}
++      {{- with .Values.iamServer.initContainers }}
++      initContainers:
++        {{- toYaml . | nindent 8 }}
++      {{- end }}
+       containers:
+         - name: iam-server
+           image: "{{ .Values.iamServer.image.repository | default .Values.image.repository }}:{{ .Values.iamServer.image.tag | default .Values.image.tag }}"
+           imagePullPolicy: {{ .Values.iamServer.image.pullPolicy | default .Values.image.pullPolicy }}
++          {{- with .Values.iamServer.command }}
++          command:
++            {{- toYaml . | nindent 12 }}
++          {{- end }}
+           env:
+             - name: VGW_BACKEND
+               value: "iam"
+@@ -270,15 +283,21 @@ spec:
+               readOnly: false
+             {{- end }}
+             {{- if .Values.iamServer.private.enabled }}
+-            - name: private-certs
++            - name: {{ $iamPrivateCertVolume | default "private-certs" }}
+               mountPath: /iam-private-certs
+               readOnly: true
+             {{- end }}
+             {{- if .Values.iamServer.tls.enabled }}
+-            - name: certificates
++            - name: {{ $iamTLSCertVolume | default "certificates" }}
+               mountPath: /certs
+               readOnly: true
+             {{- end }}
++            {{- with .Values.iamServer.extraVolumeMounts }}
++            {{- toYaml . | nindent 12 }}
++            {{- end }}
++        {{- with .Values.iamServer.extraContainers }}
++        {{- toYaml . | nindent 8 }}
++        {{- end }}
+       volumes:
+         {{- if eq .Values.iamServer.storage.type "internal" }}
+         - name: data
+@@ -289,18 +308,21 @@ spec:
+           emptyDir: {}
+           {{- end }}
+         {{- end }}
+-        {{- if .Values.iamServer.private.enabled }}
++        {{- if and .Values.iamServer.private.enabled (not $iamPrivateCertVolume) }}
+         - name: private-certs
+           secret:
+             secretName: {{ include "versitygw.iamServerPrivateCertSecretName" . }}
+             defaultMode: 0440
+         {{- end }}
+-        {{- if .Values.iamServer.tls.enabled }}
++        {{- if and .Values.iamServer.tls.enabled (not $iamTLSCertVolume) }}
+         - name: certificates
+           secret:
+             secretName: {{ .Values.iamServer.tls.secretName }}
+             defaultMode: 0440
+         {{- end }}
++        {{- with .Values.iamServer.extraVolumes }}
++        {{- toYaml . | nindent 8 }}
++        {{- end }}
+
+       {{- with .Values.iamServer.nodeSelector }}
+       nodeSelector:
+diff --git a/chart/values.yaml b/chart/values.yaml
+index 3a4a2d8..c02f7e9 100644
+--- a/chart/values.yaml
++++ b/chart/values.yaml
+@@ -406,6 +406,11 @@ iam:
+       # when both are set). Must contain tls.crt, tls.key, and ca.crt (the CA
+       # that signed iamServer's private-listener server certificate).
+       existingSecret: ""
++      # Or mount a volume defined in extraVolumes instead of a Secret (wins over
++      # both of the above), for certificates written and rotated by another
++      # container, e.g. a spiffe-helper init container/sidecar. Must provide
++      # tls.crt, tls.key, and ca.crt.
++      volumeName: ""
+       issuerRef: {}
+       #   group: cert-manager.io
+       #   kind: ClusterIssuer
+@@ -496,6 +501,9 @@ iamServer:
+   tls:
+     enabled: false
+     secretName: ""
++    # Or mount a volume defined in iamServer.extraVolumes instead of a Secret
++    # (wins over secretName). Must provide tls.crt and tls.key.
++    volumeName: ""
+
+   # -- Storage backend --
+   storage:
+@@ -547,6 +555,10 @@ iamServer:
+       # when both are set). Must contain tls.crt, tls.key, and ca.crt (the CA
+       # that signs gateway client certificates).
+       existingSecret: ""
++      # Or mount a volume defined in iamServer.extraVolumes instead of a Secret
++      # (wins over both of the above). Must provide tls.crt, tls.key, and
++      # ca.crt. May name the same volume as iamServer.tls.volumeName.
++      volumeName: ""
+       issuerRef: {}
+       #   group: cert-manager.io
+       #   kind: ClusterIssuer
+@@ -576,6 +588,14 @@ iamServer:
+   deploymentAnnotations: {}
+   podAnnotations: {}
+   podLabels: {}
++  # Pod extension hooks for the IAM server; same meaning as the top-level
++  # values of the same names below.
++  shareProcessNamespace: false
++  command: []
++  initContainers: []
++  extraContainers: []
++  extraVolumes: []
++  extraVolumeMounts: []
+
+ # Extra environment variables to pass to the container.
+ # Use this to configure advanced options not covered above (e.g. event notifications,
+@@ -589,10 +609,36 @@ iamServer:
+ #       value: "ldap://ldap.example.com"
+ extraEnv: []
+
++# --- Pod extension hooks (gateway Deployment) ---
++# Share one process namespace between the pod's containers, e.g. so a sidecar
++# that rotates certificates can signal the gateway (SIGHUP reloads its serving
++# certificates).
++shareProcessNamespace: false
++# Override the gateway container's command. Empty uses the image entrypoint.
++command: []
++# Extra init containers, sidecar containers, volumes, and gateway container
++# volume mounts, rendered as given.
++# Example (certificates from SPIFFE/SPIRE via spiffe-helper):
++#   initContainers:
++#     - name: spiffe-helper-init
++#       image: ghcr.io/spiffe/spiffe-helper:0.11.0
++#       args: ["-config", "/etc/spiffe-helper/helper.conf", "-daemon-mode=false"]
++#       volumeMounts: [...]
++#   extraVolumes:
++#     - name: spiffe-certs
++#       emptyDir: {}
++#   certificate:
++#     volumeName: spiffe-certs
++initContainers: []
++extraContainers: []
++extraVolumes: []
++extraVolumeMounts: []
++
+ # --- TLS ---
+ # Enable HTTPS for the S3 API (and admin/webui if not separately configured).
+ tls:
+-  # Set to true to enable TLS. Requires certificate.secretName or certificate.create.
++  # Set to true to enable TLS. Requires certificate.secretName,
++  # certificate.create, or certificate.volumeName.
+   enabled: false
+
+ # --- cert-manager Certificate ---
+@@ -600,6 +646,9 @@ certificate:
+   # Set to the name of an existing TLS Secret to use for HTTPS.
+   # If empty and certificate.create is false, defaults to <fullname>-cert.
+   secretName: ""
++  # Or mount a volume defined in extraVolumes instead of a Secret (wins over
++  # secretName and create). Must provide tls.crt and tls.key.
++  volumeName: ""
+   # Create a cert-manager Certificate resource to automatically provision TLS.
+   # Requires cert-manager to be installed in the cluster.
+   create: false

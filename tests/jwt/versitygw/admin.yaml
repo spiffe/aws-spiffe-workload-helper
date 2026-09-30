@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: admin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: admin
+    spec:
+      initContainers:
+      - name: spiffe-helper-init
+        image: ghcr.io/spiffe/spiffe-helper:0.11.0
+        args: ["-config", "/etc/spiffe-helper/helper.conf", "-daemon-mode=false"]
+        volumeMounts: &spiffeHelperMounts
+        - mountPath: /spiffe-workload-api
+          name: spiffe-workload-api
+          readOnly: true
+        - mountPath: /etc/spiffe-helper
+          name: spiffe-helper-config
+          readOnly: true
+        - mountPath: /spiffe-certs
+          name: spiffe-certs
+      containers:
+      - command:
+        - /bin/bash
+        args:
+        - -c
+        - |
+          mkdir -p ~/.aws
+          cat > ~/.aws/credentials <<EOF
+          [default]
+          aws_access_key_id = admin
+          aws_secret_access_key = admin1234
+          region = us-east-1
+          EOF
+          cat > ~/setup.sh <<"EOF"
+          #!/bin/bash
+          set -ex
+          IAM="https://versitygw-iam.versitygw:7070"
+          S3="https://versitygw.versitygw:7070"
+          ISSUER="spire-spiffe-oidc-discovery-provider.spire-server"
+          PROVIDER_ARN="arn:aws:iam::000000000000:oidc-provider/${ISSUER}"
+
+          # The discovery document is fetched from the IAM server's loopback
+          # sidecar (iamServer.oidc.discoveryUrls), so no thumbprint is involved.
+          aws iam --endpoint-url "$IAM" create-open-id-connect-provider --url "https://${ISSUER}" --client-id-list versitygw || \
+            aws iam --endpoint-url "$IAM" get-open-id-connect-provider --open-id-connect-provider-arn "$PROVIDER_ARN"
+
+          echo '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":["'"$PROVIDER_ARN"'"]},"Action":["sts:AssumeRoleWithWebIdentity"],"Condition":{"StringEquals":{"'"$ISSUER"':groups":"data-test-rw"}}}]}' > spire-policy.json
+
+          aws iam --endpoint-url "$IAM" create-role --role-name spire --assume-role-policy-document file://spire-policy.json || \
+            aws iam --endpoint-url "$IAM" update-assume-role-policy --role-name spire --policy-document file://spire-policy.json
+
+          echo '{"Version": "2012-10-17", "Statement": [{ "Effect": "Allow", "Action": ["s3:Get*", "s3:Put*", "s3:List*"], "Resource": "arn:aws:s3:::data/test/*"}]}' > data-bucket.json
+
+          aws iam --endpoint-url "$IAM" put-role-policy \
+              --role-name spire \
+              --policy-name bucket-data-policy \
+              --policy-document file://data-bucket.json
+
+          aws --endpoint-url "$S3" s3 mb s3://data || aws --endpoint-url "$S3" s3api head-bucket --bucket data
+          aws --endpoint-url "$S3" s3 ls s3://data
+          EOF
+          chmod +x ~/setup.sh
+          while true; do sleep 1000; done
+        name: main
+        image: amazon/aws-cli:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: AWS_CA_BUNDLE
+          value: /spiffe-certs/ca.crt
+        - name: AWS_REGION
+          value: us-east-1
+        - name: AWS_EC2_METADATA_DISABLED
+          value: "true"
+        volumeMounts:
+        - mountPath: /spiffe-certs
+          name: spiffe-certs
+          readOnly: true
+      - name: spiffe-helper
+        image: ghcr.io/spiffe/spiffe-helper:0.11.0
+        args: ["-config", "/etc/spiffe-helper/helper.conf"]
+        volumeMounts: *spiffeHelperMounts
+      volumes:
+      - csi:
+          driver: csi.spiffe.io
+          readOnly: true
+        name: spiffe-workload-api
+      - configMap:
+          name: spiffe-helper
+        name: spiffe-helper-config
+      - emptyDir: {}
+        name: spiffe-certs
