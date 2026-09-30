@@ -18,8 +18,6 @@ spec:
         args:
         - -c
         - |
-          curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /bin/mc
-          chmod +x /bin/mc
           mkdir -p ~/.aws
           cat > ~/.aws/config <<EOF
           [default]
