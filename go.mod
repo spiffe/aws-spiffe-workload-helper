@@ -1,6 +1,6 @@
 module github.com/spiffe/aws-spiffe-workload-helper
 
-go 1.25.0
+go 1.27.1
 
 require (
 	github.com/aws/aws-sdk-go v1.55.5
