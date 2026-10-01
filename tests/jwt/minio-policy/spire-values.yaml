@@ -1,5 +1,6 @@
 spire-server:
   enabled: true
+  jwtIssuer: http://spire-spiffe-oidc-discovery-provider.spire-server
   controllerManager:
     enabled: true
     identities:
@@ -28,6 +29,7 @@ spire-server:
 
 spiffe-oidc-discovery-provider:
   enabled: true
+  jwtIssuer: http://spire-spiffe-oidc-discovery-provider.spire-server
   tls:
     spire:
       enabled: false
