@@ -339,7 +339,7 @@ func buildCanonicalHeaders(r *http.Request, signedHeaders []string) (string, str
 
 // buildCanonicalQueryString produces the SigV4 canonical query string.
 func buildCanonicalQueryString(r *http.Request) string {
-	return strings.Replace(r.URL.Query().Encode(), "+", "%20", -1)
+	return strings.ReplaceAll(r.URL.Query().Encode(), "+", "%20")
 }
 
 func sha256Hex(data []byte) string {
