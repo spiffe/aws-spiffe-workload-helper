@@ -10,9 +10,12 @@ cd "${BASEPATH}"
 make
 kubectl cp aws-spiffe-workload-helper test-0:/tmp/aws-spiffe-workload-helper
 
+echo "MinIO role ARNs and OpenID config (diagnostic only)..."
+kubectl logs -n minio deploy/minio | grep -i -E 'IAM Roles|openid|identity' || true
+kubectl exec -i -n minio deploy/minio -- env MC_HOST_local=http://admin:admin1234@localhost:9000 mc idp openid ls local || true
+kubectl exec -i -n minio deploy/minio -- env MC_HOST_local=http://admin:admin1234@localhost:9000 mc idp openid info local spire || true
+
 echo "Starting tests that should work..."
-kubectl exec -i test-0 -- bash -c 'mc alias set minio http://minio.minio:9000 admin admin1234' || true
-kubectl exec -i test-0 -- bash -c 'mc idp openid info minio spire'
 kubectl exec -i test-0 -- bash -c 'echo "hello from $(date)" > hello.txt'
 kubectl exec -i test-0 -- bash -c 'aws --endpoint-url http://minio.minio:9000 s3 cp hello.txt s3://data/test/hello.txt'
 kubectl exec -i test-0 -- bash -c 'aws --endpoint-url http://minio.minio:9000 s3 cp s3://data/test/hello.txt hello2.txt'
