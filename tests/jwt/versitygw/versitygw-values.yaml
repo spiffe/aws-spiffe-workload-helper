@@ -1,4 +1,4 @@
-# Values for the versitygw chart with chart.patch applied. Every listener
+# Values for the versitygw chart (0.4.5+). Every listener
 # serves a SPIRE X509-SVID written by spiffe-helper, and clients verify it
 # against the SPIRE trust bundle.
 auth:
