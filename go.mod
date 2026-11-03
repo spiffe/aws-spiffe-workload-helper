@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/aws/aws-sdk-go v1.55.5
 	github.com/aws/rolesanywhere-credential-helper v1.2.0
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/spf13/cobra v1.8.1
 	github.com/spiffe/go-spiffe/v2 v2.7.0
 	github.com/stretchr/testify v1.11.1
