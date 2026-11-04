@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spiffe-helper
+  namespace: versitygw
+data:
+  # Sidecar: keeps the SVID up to date and SIGHUPs versitygw after every write.
+  helper.conf: |
+    agent_address = "/spiffe-workload-api/spire-agent.sock"
+    cert_dir = "/spiffe-certs"
+    svid_file_name = "tls.crt"
+    svid_key_file_name = "tls.key"
+    svid_bundle_file_name = "ca.crt"
+    daemon_mode = true
+    pid_file_name = "/run/versitygw/pid"
+    renew_signal = "SIGHUP"
+  # Init container: writes the SVID once before versitygw starts. No pid file,
+  # as spiffe-helper would otherwise wait on it before exiting.
+  helper-init.conf: |
+    agent_address = "/spiffe-workload-api/spire-agent.sock"
+    cert_dir = "/spiffe-certs"
+    svid_file_name = "tls.crt"
+    svid_key_file_name = "tls.key"
+    svid_bundle_file_name = "ca.crt"
+    daemon_mode = false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oidc-discovery-provider
+  namespace: versitygw
+data:
+  # Serves the SPIRE JWT keys to the IAM server over loopback. The issuer stays
+  # the cluster's public one; versitygw is pointed here via
+  # iamServer.oidc.discoveryUrls.
+  oidc-discovery-provider.conf: |
+    log_level = "debug"
+    domains = ["127.0.0.1"]
+    insecure_addr = "127.0.0.1:8008"
+    allow_insecure_scheme = true
+    jwt_issuer = "https://spire-spiffe-oidc-discovery-provider.spire-server"
+    jwks_uri = "http://127.0.0.1:8008/keys"
+    workload_api {
+      socket_path = "/spiffe-workload-api/spire-agent.sock"
+      trust_domain = "example.org"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spiffe-helper
+  namespace: default
+data:
+  # Keeps the SPIRE trust bundle current for the aws-cli and the helper. They
+  # read it on every invocation, so no signal is needed.
+  helper.conf: |
+    agent_address = "/spiffe-workload-api/spire-agent.sock"
+    cert_dir = "/spiffe-certs"
+    svid_file_name = "tls.crt"
+    svid_key_file_name = "tls.key"
+    svid_bundle_file_name = "ca.crt"
+    daemon_mode = true

@@ -1,0 +1,63 @@
+spire-server:
+  enabled: true
+  jwtIssuer: https://spire-spiffe-oidc-discovery-provider.spire-server
+  controllerManager:
+    enabled: true
+    identities:
+      clusterSPIFFEIDs:
+        test:
+          labels:
+            app.kubernetes.io/instance: test
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          spiffeIDTemplate: spiffe://{{ .TrustDomain }}/versitygw/data-test-rw
+        versitygw-gateway:
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: versitygw
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: versitygw
+              app.kubernetes.io/instance: versitygw
+          spiffeIDTemplate: spiffe://{{ .TrustDomain }}/versitygw/gateway
+          dnsNameTemplates:
+            - versitygw
+            - versitygw.versitygw
+            - versitygw.versitygw.svc
+            - versitygw.versitygw.svc.cluster.local
+        versitygw-iam:
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: versitygw
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: iam-server
+          spiffeIDTemplate: spiffe://{{ .TrustDomain }}/versitygw/iam
+          dnsNameTemplates:
+            - versitygw-iam
+            - versitygw-iam.versitygw
+            - versitygw-iam.versitygw.svc
+            - versitygw-iam.versitygw.svc.cluster.local
+            - versitygw-iam-private
+            - versitygw-iam-private.versitygw
+            - versitygw-iam-private.versitygw.svc
+            - versitygw-iam-private.versitygw.svc.cluster.local
+  credentialComposer:
+    cel:
+      enabled: true
+      jwt:
+        expression: |
+          spire.plugin.server.credentialcomposer.v1.ComposeWorkloadJWTSVIDResponse{
+            attributes: spire.plugin.server.credentialcomposer.v1.JWTSVIDAttributes{
+              claims: request.attributes.claims.mapOverrideEntries(
+                request.spiffe_id.startsWith(spiffe_trust_domain + "/versitygw/")?
+                  {'groups': [request.spiffe_id.substring(spiffe_trust_domain.size() + 11)]}:
+                  {}
+              )
+            }
+          }
+
+spiffe-oidc-discovery-provider:
+  enabled: true
+  jwtIssuer: https://spire-spiffe-oidc-discovery-provider.spire-server

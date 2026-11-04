@@ -1,0 +1,120 @@
+# Values for the versitygw chart (0.4.5+). Every listener
+# serves a SPIRE X509-SVID written by spiffe-helper, and clients verify it
+# against the SPIRE trust bundle.
+auth:
+  accessKey: admin
+  secretKey: admin1234
+
+persistence:
+  enabled: false
+
+gateway:
+  logLevel: debug
+
+tls:
+  enabled: true
+certificate:
+  volumeName: spiffe-certs
+
+iam:
+  enabled: true
+  type: standalone
+  standalone:
+    certificate:
+      volumeName: spiffe-certs
+
+# spiffe-helper signals versitygw through a pid file. The pid is written a few
+# seconds after exec so versitygw has installed its SIGHUP handler by then;
+# spiffe-helper keeps retrying the pid file for ~100s.
+shareProcessNamespace: true
+command: &command
+  - /bin/sh
+  - -c
+  - (sleep 3; echo $$ > /run/versitygw/pid) & exec /usr/local/bin/docker-entrypoint.sh
+initContainers: &initContainers
+  - name: spiffe-helper-init
+    image: ghcr.io/spiffe/spiffe-helper:0.11.0
+    args: ["-config", "/etc/spiffe-helper/helper-init.conf"]
+    securityContext: &containerSecurityContext
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+    volumeMounts: &spiffeHelperMounts
+      - name: spiffe-workload-api
+        mountPath: /spiffe-workload-api
+        readOnly: true
+      - name: spiffe-helper-config
+        mountPath: /etc/spiffe-helper
+        readOnly: true
+      - name: spiffe-certs
+        mountPath: /spiffe-certs
+      - name: vgw-run
+        mountPath: /run/versitygw
+extraContainers:
+  - name: spiffe-helper
+    image: ghcr.io/spiffe/spiffe-helper:0.11.0
+    args: ["-config", "/etc/spiffe-helper/helper.conf"]
+    securityContext: *containerSecurityContext
+    volumeMounts: *spiffeHelperMounts
+extraVolumes: &extraVolumes
+  - name: spiffe-workload-api
+    csi:
+      driver: csi.spiffe.io
+      readOnly: true
+  - name: spiffe-helper-config
+    configMap:
+      name: spiffe-helper
+  - name: spiffe-certs
+    emptyDir: {}
+  - name: vgw-run
+    emptyDir: {}
+  - name: oidc-config
+    configMap:
+      name: oidc-discovery-provider
+extraVolumeMounts: &extraVolumeMounts
+  - name: vgw-run
+    mountPath: /run/versitygw
+
+iamServer:
+  enabled: true
+  logLevel: debug
+  persistence:
+    enabled: false
+  tls:
+    enabled: true
+    volumeName: spiffe-certs
+  private:
+    certificate:
+      volumeName: spiffe-certs
+  oidc:
+    # The discovery document comes from the loopback sidecar below, over http.
+    allowInsecureTransport: true
+    discoveryUrls:
+      - "https://spire-spiffe-oidc-discovery-provider.spire-server=http://127.0.0.1:8008/.well-known/openid-configuration"
+  shareProcessNamespace: true
+  command: *command
+  initContainers: *initContainers
+  extraContainers:
+    - name: spiffe-helper
+      image: ghcr.io/spiffe/spiffe-helper:0.11.0
+      args: ["-config", "/etc/spiffe-helper/helper.conf"]
+      securityContext: *containerSecurityContext
+      volumeMounts: *spiffeHelperMounts
+    - name: oidc
+      image: ghcr.io/spiffe/oidc-discovery-provider:1.15.3
+      args: ["-config", "/etc/oidc-discovery-provider/oidc-discovery-provider.conf"]
+      securityContext: *containerSecurityContext
+      volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: oidc-config
+          mountPath: /etc/oidc-discovery-provider
+          readOnly: true
+  extraVolumes: *extraVolumes
+  extraVolumeMounts: *extraVolumeMounts
